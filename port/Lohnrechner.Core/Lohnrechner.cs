@@ -5,7 +5,8 @@ namespace Lohnrechner.Core;
 // "QUIRK (deliberately not fixed)" at the same places as in the Delphi unit, with the row of
 // docs/uMain-behavior.md where they were observed. Port decisions: docs/decisions.md D22.
 //
-// Delphi Currency (64-bit integer scaled by 10,000) is held as decimal with at most 4 decimals.
+// Delphi Currency (64-bit integer scaled by 10,000) is held as decimal with at most 4 decimals,
+// floating point as Extended (Extended.cs), like the Win32 compiler does.
 // Not ported: the annual total. It is a window session counter, not part of the service
 // contract (docs/decisions.md D19), and the Delphi window keeps using the Delphi core.
 
@@ -64,16 +65,17 @@ public sealed class Lohnrechner
         if (bemessungsgrundlage < 0)
             bemessungsgrundlage = 0;
 
-        decimal steuer = Delphi.CurrencyMalDouble(bemessungsgrundlage, Steuersatz(steuerklasse));
+        decimal steuer = Delphi.CurrencyMal(bemessungsgrundlage, Delphi.Ext(Steuersatz(steuerklasse)));
         decimal kiSt;
         if (kirchensteuer)
-            kiSt = Delphi.CurrencyMalDouble(steuer, 0.09);
+            kiSt = Delphi.CurrencyMal(steuer, Delphi.Literal009);
         else
             kiSt = 0;
 
         // QUIRK (deliberately not fixed): Trunc cuts off the third decimal instead of rounding;
         // Steuer and KiSt are Currency, so Currency * Double is rounded to 4 decimals first. From the
         // code; the net path has no behavior-record row, it is pinned by grid.golden.txt
+        // Currency arithmetic is exact, so decimal gives the same digits as the FPU here
         decimal betrag = Math.Truncate((brutto - steuer - kiSt) * 100) / 100;
 
         // QUIRK (deliberately not fixed), Delphi only: every successful net calculation adds to the
@@ -92,15 +94,19 @@ public sealed class Lohnrechner
 
         double rate = Steuersatz(steuerklasse);
         if (kirchensteuer)
-            rate = rate + rate * 0.09;
+            // Computed in Extended, stored back into a Double
+            rate = (Delphi.Ext(rate) + Delphi.Ext(rate) * Delphi.Literal009).AlsDouble();
         decimal freibetrag = _holeFreibetrag(personalnummer);
 
         // QUIRK (deliberately not fixed): the inverse formula ignores the clamp of the taxable base
         // at 0, so a net below the allowance gives a wrong, even negative gross - see #3, #3b
         // QUIRK (deliberately not fixed): computed in floating point and truncated, so some results
         // lose a cent and net -> gross -> net does not round-trip - see #4b, #4e
-        double brutto = ((double)netto - rate * (double)freibetrag) / (1 - rate);
-        decimal betrag = Delphi.TruncDurch100(brutto * 100);
+        // The whole expression is Extended in Delphi Win32; in double, 9 cases of cases.json get a
+        // different cent, among them #4e (docs/decisions.md D22)
+        Extended r = Delphi.Ext(rate);
+        Extended brutto = (Delphi.Ext(netto) - r * Delphi.Ext(freibetrag)) / (Delphi.Ext(1) - r);
+        decimal betrag = Delphi.TruncDurch100(brutto * Delphi.Ext(100));
 
         // QUIRK (deliberately not fixed): the gross calculation never adds to the annual total - see #2a
         return new LohnErgebnis(betrag, LohnFehler.Keiner);
