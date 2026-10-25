@@ -31,7 +31,7 @@ uses
   Winapi.Windows, System.SysUtils, System.StrUtils, System.Classes, System.IOUtils, System.UITypes,
   System.SyncObjs, System.Generics.Collections,
   Vcl.Forms, Vcl.StdCtrls, Vcl.ExtCtrls, Vcl.Dialogs, Vcl.Consts,
-  uTestSetup, uPersonalstamm, uMain, uLohnrechnerCore, uCoreTests;
+  uTestSetup, uPersonalstamm, uMain, uLohnrechnerCore, uCoreTests, uContractCases;
 
 const
   RequiredFiles: array[0..2] of string = ('curated.txt', 'grid.golden.txt', 'sequence.golden.txt');
@@ -752,6 +752,11 @@ begin
     Mode := LowerCase(ParamStr(1));
     if Mode = 'selftest-watchdog' then
       Exit(SelfTestWatchdog);
+    // Part 4 contract: the grid translated into neutral requests/responses (uContractCases)
+    if Mode = 'contract' then
+      Exit(RunContractChecks(GoldenDir));
+    if Mode = 'export-contract' then
+      Exit(ExportContractCases(GoldenDir));
 
     // 'core': the calculation grid against TLohnrechner without the window, plus unit tests.
     // Default: every golden file against the real window.

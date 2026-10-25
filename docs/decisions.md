@@ -116,10 +116,40 @@ The Delphi app has one window (`uMain.pas` + `uMain.dfm`, like a WinForms view w
 
 ---
 
-## Open (Part 4)
+## Part 4: towards a standalone service
 
-## O1 Where the annual total lives in a service
-Per user, per session, persisted? Not decided. The task says not to guess the target architecture; Part 4 will state assumptions.
+The target architecture is not decided, so these decisions are built on stated assumptions (README, Part 4: A1–A7) rather than on a chosen stack.
+
+## D19 The annual total is not part of the service
+**Decided.** Replaces open question O1.
+- **Why:** the window's total is a UI session counter: it adds up every calculation in a window session, including each keystroke and across employees. It's not a payroll figure. The service answers one question: the result of one calculation.
+- **No code change:** the core class keeps the total, because the Delphi window uses it (D11). The service contract simply doesn't expose it.
+- **Consequence, stated:** a web client that rebuilds the counter may do it slightly differently (e.g. also add gross results). Acceptable for a client feature.
+- **If the business wants a real annual total** (per employee, per year, from actual payroll runs): that's a new feature with its own data, not a port of this one.
+
+## D20 Next steps, ranked
+**Decided.**
+1. **Service contract + portable proof.** A language-neutral request/response and the golden calculation cases as neutral data, proven lossless. *First, because every option for the open architecture needs it, and it depends on no open decision.*
+2. **Remove the hidden dependencies that break as a service.** Employee data is loaded at program start, from the exe's folder, with the machine's number format; on an English server every allowance would silently be 0 (quirk 9a). Make data source and format explicit and replaceable, with the Delphi app passing exactly what it does today. *Second, because it's the biggest risk of any server deployment; making it replaceable needs no decision on the final data source.*
+3. **Host the core behind the contract, then migrate callers.** Thin network layer, replay the neutral cases over the network, then switch the Delphi app (behind a fallback) and add a frontend. A port, if the stack isn't Delphi, happens here, checked by the same cases. *Last, because it depends on the open stack decision; steps 1 and 2 make it low-risk.*
+- **Considered and rejected as next steps:** a web frontend (comes after the service exists; out of scope per spec); hosting first (would guess the architecture).
+- **If the data source were replaced anyway,** step 2 would shrink, and the order would be contract → host → migrate callers.
+
+## D21 The slice of step 1: contract wrapper + neutral cases, no extra program
+**Decided.**
+- **Built:** `uLohnrechnerVertrag.pas` (JSON in/out, stable error codes, decimal strings), `tests/golden/contract/cases.json` generated from the recorded grid, and checks: lossless round trip back to the golden lines, freshness of `cases.json`, all 1680 requests through the wrapper, malformed requests rejected.
+- **Decimal strings for amounts:** JSON numbers are binary floating point in most stacks; amounts here are exact decimals and single cents matter.
+- **`INVALID_REQUEST` is new behavior,** the only one: the window never receives malformed JSON, so there is nothing original to keep. The contract rejects instead of guessing.
+- **Left out:** a small command-line program for live demos (JSON in, JSON out, without any window code). Useful for showing and as an extra separation proof, but not needed by the next steps; left out to keep the slice smallest.
+- **Stopgap until step 2:** like the tests, the reference implementation still relies on `personal.dat` being loaded with German number format.
+
+## Open questions for the team (Part 4)
 
 ## O2 Where employee data comes from in a service
-`personal.dat` next to the exe won't work for a service. Database or another service, not decided.
+`personal.dat` next to the exe won't work for a service. Database or another service, not decided. Step 2 makes it replaceable without deciding it.
+
+## O3 Target stack and hosting
+Delphi service, port to another language, cloud or on-premises: not decided. Step 3 depends on it; `cases.json` checks whichever is chosen.
+
+## O4 Should quirks ever be fixed?
+Every quirk is kept on purpose. Fixing one is a business decision per quirk, with the golden files and `cases.json` deliberately updated in a reviewed change.
