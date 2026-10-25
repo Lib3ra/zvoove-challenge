@@ -10,7 +10,7 @@ Starter code: `.../MiniLohnrechner_Case_Study/MiniLohnrechner_Bewerberaufgabe/`
 - **Expected test values come from the running original, not from reading the code.** Run the unmodified app/logic first, record outputs, then refactor against them.
 - **Part 3 artifact = a Claude Code skill** in `.claude/skills/<name>/SKILL.md`, committed to the repo. It is written early and used during Parts 1 and 2 (spec requires it to be actually used).
 - **Bonus port: shelved** for now.
-- **Annual total ownership: open.** Is the net-pay accumulation business logic (moves to the core) or UI state (stays in the form)? Decide before Part 1.
+- **Annual total ownership: core.** The accumulation lives inside `BerechneNetto` itself (add on every net calculation, never in `BerechneBrutto`, reset to 0), so it is calculation logic and moves to the core unchanged. The form only displays it. This makes quirks 1, 2, 6 and 7c unit-testable.
 
 ## First steps on Windows
 
