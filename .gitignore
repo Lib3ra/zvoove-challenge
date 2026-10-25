@@ -79,3 +79,7 @@ __recovery/
 *.stat
 
 *.DS_Store
+# Golden test build output and the personal.dat copy placed next to the test exe
+**/tests/bin/
+**/tests/Win32/
+**/tests/Win64/

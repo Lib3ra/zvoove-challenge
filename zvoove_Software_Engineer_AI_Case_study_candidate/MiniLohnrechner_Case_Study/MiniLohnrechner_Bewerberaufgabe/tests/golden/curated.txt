@@ -1,0 +1,157 @@
+# Curated cases: the rows of docs/uMain-behavior.md, with the values observed
+# by hand in the unmodified app (German regional format). Written by hand,
+# never recorded by a program. Case ids are the row numbers.
+# Not here: 8 (missing personal.dat) and 9a (en-US), because the data file is
+# loaded once per process with the pinned German format.
+# File format: see the header of uGoldenRunner.pas.
+
+[case 1 Every net calculation adds to the total, per keystroke]
+type pers 1001
+class 3
+type brutto 12344
+expect netto 11134,6
+expect total Jahressumme Netto: 12406,20 EUR
+expect no-dialog
+
+[case 2a Gross path never adds to the total]
+type pers 1002
+class 1
+type netto 860
+expect brutto 1000
+expect total Jahressumme Netto: 0,00 EUR
+
+[case 6 Changing the class recalculates from gross, even after editing net]
+type pers 1002
+class 1
+type netto 860
+class 3
+expect netto 900
+expect total Jahressumme Netto: 900,00 EUR
+
+[case 3 Inverse formula ignores the clamp at 0]
+type pers 1003
+class 1
+type netto 1
+expect brutto -161,62
+type netto 0
+expect brutto -151,16
+type netto 0
+expect brutto -46,51
+expect total Jahressumme Netto: 0,00 EUR
+expect no-dialog
+
+[case 3b Inverse formula with net 0]
+type pers 1003
+class 1
+type netto 100
+clear netto
+type netto 0
+expect brutto -162,79
+
+[case 4a Net to gross keeps the cent: class I]
+type pers 1002
+class 1
+type netto 86
+expect brutto 100
+
+[case 4b Net to gross loses a cent: class II]
+type pers 1002
+class 2
+type netto 82
+expect brutto 99,99
+
+[case 4c Net to gross keeps the cent: class III]
+type pers 1002
+class 3
+type netto 90
+expect brutto 100
+
+[case 4d Net to gross keeps the cent: class V]
+type pers 1002
+class 5
+type netto 74
+expect brutto 100
+
+[case 4e Net to gross loses a cent: class VI]
+type pers 1002
+class 6
+type netto 70
+expect brutto 99,99
+
+[case 4f Net to gross with church tax]
+type pers 1002
+class 1
+church on
+type netto 100
+expect brutto 118
+
+[case 5a No tax class: message on every keystroke]
+type pers 1002
+type brutto 5
+expect dialog message Bitte zuerst eine Steuerklasse waehlen.
+expect netto 0
+type brutto 0
+expect dialog message Bitte zuerst eine Steuerklasse waehlen.
+expect total Jahressumme Netto: 0,00 EUR
+
+[case 5b Tax class is checked before the sign]
+type brutto -5
+expect dialog message Bitte zuerst eine Steuerklasse waehlen.
+expect netto 0
+
+[case 5c Negative gross: warning, already when the class is picked]
+type brutto -5
+expect dialog message Bitte zuerst eine Steuerklasse waehlen.
+class 1
+expect dialog warning Brutto darf nicht negativ sein.
+expect netto 0
+expect total Jahressumme Netto: 0,00 EUR
+
+[case 5d Negative net: warning]
+class 1
+type netto -5
+expect dialog warning Netto darf nicht negativ sein.
+expect brutto 0
+
+[case 7a Non-numeric employee number: allowance 0, silently]
+class 3
+type brutto 1000
+type pers abc
+expect netto 900
+expect no-dialog
+
+[case 7b Unknown employee number: allowance 0, silently]
+class 3
+type brutto 1000
+type pers 9999
+expect netto 900
+expect no-dialog
+
+[case 7c Employee number keystrokes add to the total]
+class 3
+type brutto 1000
+expect total Jahressumme Netto: 999,90 EUR
+type pers 1001
+expect netto 925
+expect total Jahressumme Netto: 4624,90 EUR
+
+# 9b was not checked in the app; expectation from the code only.
+[case 9b Reset sets the hard-coded caption]
+class 3
+type brutto 1000
+reset
+expect total Jahressumme Netto: 0,00 EUR
+
+[case 10a Classes II and IV share a rate]
+type pers 1002
+class 2
+type brutto 1000
+expect netto 820
+class 4
+expect netto 820
+
+[case 10b Net drops the trailing zero]
+type pers 1002
+class 3
+type brutto 1001
+expect netto 900,9
