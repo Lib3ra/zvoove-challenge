@@ -59,7 +59,7 @@ Smaller ones of the same kind: a guess presented as fact (that Win64 would give 
 
 - **Define expected values.** If the AI computes what the right result is, the tests pin the AI's mistake. Here they came from my click-through of the running original or were recorded from the original code.
 - **Change golden files or "fix" behavior.** Re-recording a golden file to make tests pass would hide exactly the regression the tests exist for. Same for quietly fixing a quirk the task says to keep.
-- **Report "it builds" or "tests pass" without the output.** The AI couldn't compile, so every build was mine, in the IDE. Test results in this README come from actual test output, not from a description of it; after each key step I ran the suite in my own terminal.
+- **Report "it builds" or "tests pass" without the output.** The AI couldn't compile the Delphi code, so every Delphi build was mine, in the IDE. (The C# port is the exception: built and run by the AI on the Mac, with the output in its pull request.) Test results in this README come from actual test output, not from a description of it; after each key step I ran the suite in my own terminal.
 - **Make the design decisions.** What is business logic, what the service returns, what to cut: the AI proposed, I decided, and the reasons are in `docs/decisions.md`.
 - **Merge its own work.** Every part went through a pull request I reviewed.
 
@@ -196,10 +196,35 @@ Specification, examples and how to check another implementation: [`docs/service-
 - Which stack and hosting (A4)?
 - Should any quirk ever be fixed? That's a business decision per quirk, with golden files and `cases.json` deliberately updated.
 
+## Bonus: C# port
+
+The extracted core, quirks included, ported to C# and served as an ASP.NET Core minimal API (`POST /calculate`) that speaks the Part 4 contract. Code in `port/`, decisions in [`docs/decisions.md`](docs/decisions.md) D22.
+
+**Run** (.NET 10 SDK, from the repository root; tested on macOS only so far):
+
+```
+dotnet run --project port/Lohnrechner.ContractTests
+```
+
+On macOS/Linux also `./port/run-port-tests.sh`. To try the API by hand: `dotnet run --project port/Lohnrechner.Api`, then `POST` a request to `http://127.0.0.1:5151/calculate`.
+
+**What it proves:** the port behaves like the Delphi implementation on the **same, unchanged** test data. The runner reads `cases.json` and checks all 1680 cases twice, in-process and over HTTP against the API started on a free local port, plus the 8 malformed requests of the Delphi check. Responses are compared field by field (`"11134.60"` is not `"11134.6"`). Output:
+
+```
+[port core] 1680 cases, 0 failed
+[port http] 1680 cases, 0 failed
+[port] 8 invalid requests, 0 not rejected
+RESULT: OK
+```
+
+**The lost cent needed 80-bit arithmetic.** A straightforward port with `double` failed 9 net → gross cases by one cent, among them the observed quirk 4e. Delphi Win32 calculates on the x87 FPU with 80-bit intermediates; .NET has no such type. The port emulates it exactly (`port/Lohnrechner.Core/Extended.cs`), and all 1680 pass. Deliberately replacing truncation with rounding makes 314 cases fail per run, the same count as on the Delphi side.
+
+**Not ported:** the annual total (not part of the contract, D19) and the machine-culture parsing of `personal.dat` (quirk 9a, a step 2 problem). `run-tests.bat` doesn't run the port yet.
+
 ## What was cut or not finished
 
 **Not done:**
-- **Bonus port** to another language. Prepared but not built: the contract and `cases.json` from Part 4 are exactly the shared test data the bonus asks for. A C# minimal API behind the same contract was the planned next step; it needs a .NET SDK, which isn't installed on the machine. One thing to expect: the lost-cent quirk comes from Delphi's 80-bit intermediate floating point, so a port using 64-bit `double` may differ in the last cent for some cases, and `cases.json` would show exactly which.
+- **The bonus port is not part of `run-tests.bat` yet.** It runs with its own command (see "Bonus: C# port"); the Windows script still has to get an optional step for it.
 - **Part 4 steps 2 and 3** (service-safe data loading; hosting). By design: only the slice of step 1 was required.
 
 **Cut on purpose, with the risk stated:**
