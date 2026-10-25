@@ -4,6 +4,7 @@
 # Not here: 8 (missing personal.dat) and 9a (en-US), because the data file is
 # loaded once per process with the pinned German format.
 # File format: see the header of uGoldenRunner.pas.
+# cases: 21
 
 [case 1 Every net calculation adds to the total, per keystroke]
 type pers 1001

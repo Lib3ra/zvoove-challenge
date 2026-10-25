@@ -14,7 +14,10 @@ unit uGoldenRunner;
     expect total <caption>     running total label must equal <caption>
     expect dialog <kind> <text>  next logged dialog must match (kind: message, warning, ...)
     expect no-dialog           no dialog may have been shown since the last dialog check
-  <field> is pers, brutto or netto. Dialogs left unchecked at the end of a case fail it. }
+    # cases: <n>               the file must contain exactly <n> cases (catches truncation)
+  <field> is pers, brutto or netto. Dialogs left unchecked at the end of a case fail it.
+  Every file in RequiredFiles must exist. A step that does not finish within
+  StepTimeoutMs (e.g. a dialog the catcher cannot close) fails the whole run. }
 
 interface
 
@@ -23,11 +26,25 @@ function RunGolden: Integer;  // process exit code: 0 ok, 1 failures, 2 setup er
 implementation
 
 uses
-  System.SysUtils, System.Classes, System.IOUtils, System.UITypes, System.Generics.Collections,
+  Winapi.Windows, System.SysUtils, System.Classes, System.IOUtils, System.UITypes,
+  System.SyncObjs, System.Generics.Collections,
   Vcl.Forms, Vcl.StdCtrls, Vcl.ExtCtrls, Vcl.Dialogs, Vcl.Consts,
   uTestSetup, uPersonalstamm, uMain;
 
+const
+  RequiredFiles: array[0..2] of string = ('curated.txt', 'grid.golden.txt', 'sequence.golden.txt');
+  StepTimeoutMs = 10000;
+
+var
+  BusySince: Int64;          // GetTickCount64 when the current step started, 0 while idle
+  CurrentWhere: ShortString; // file:line of the current step, for the watchdog message
+
 type
+  // Ends the process if one step hangs, instead of blocking the test run forever
+  TWatchdog = class(TThread)
+  protected
+    procedure Execute; override;
+  end;
   // Access to the protected Change, which the VCL calls when the user picks an item
   TComboBoxAccess = class(TComboBox);
 
@@ -47,6 +64,7 @@ type
     FForm: TForm1;
     FDialogs: TDialogCatcher;
     function Field(const Name: string): TEdit;
+    procedure DoAct(const Line: string);
   public
     constructor Create;
     destructor Destroy; override;
@@ -58,7 +76,7 @@ type
   end;
 
   TStats = record
-    Cases, Failed: Integer;
+    Cases, Failed, FileErrors: Integer;
   end;
 
 procedure SplitFirst(const S: string; out Head, Tail: string);
@@ -75,6 +93,27 @@ begin
   begin
     Head := Copy(S, 1, P - 1);
     Tail := Copy(S, P + 1, MaxInt);
+  end;
+end;
+
+{ TWatchdog }
+
+procedure TWatchdog.Execute;
+var
+  Since: Int64;
+begin
+  while not Terminated do
+  begin
+    Sleep(500);
+    Since := TInterlocked.Read(BusySince);
+    if (Since <> 0) and (Int64(GetTickCount64) - Since > StepTimeoutMs) then
+    begin
+      Writeln(Format('FAIL %s step did not finish within %d s (a dialog the runner cannot close?)',
+        [string(CurrentWhere), StepTimeoutMs div 1000]));
+      Writeln('RESULT: FAILED');
+      Flush(Output);
+      ExitProcess(1);
+    end;
   end;
 end;
 
@@ -168,6 +207,16 @@ begin
 end;
 
 procedure TCaseRunner.Act(const Line: string);
+begin
+  TInterlocked.Exchange(BusySince, Int64(GetTickCount64));
+  try
+    DoAct(Line);
+  finally
+    TInterlocked.Exchange(BusySince, 0);
+  end;
+end;
+
+procedure TCaseRunner.DoAct(const Line: string);
 var
   Verb, Rest, Name, Value: string;
   E: TEdit;
@@ -259,7 +308,7 @@ end;
 procedure RunFile(Runner: TCaseRunner; const FileName: string; var Stats: TStats);
 var
   Lines: TStringList;
-  I, LineNo: Integer;
+  I, LineNo, FileCases, DeclaredCases: Integer;
   Line, CaseId, Verb, Rest, Msg: string;
   CaseFailed: Boolean;
 
@@ -276,6 +325,7 @@ var
     if Runner.PendingDialogs <> '' then
       Fail('unexpected dialog: ' + Runner.PendingDialogs);
     Inc(Stats.Cases);
+    Inc(FileCases);
     if CaseFailed then
       Inc(Stats.Failed);
   end;
@@ -287,10 +337,15 @@ begin
     CaseId := '';
     CaseFailed := False;
     LineNo := 0;
+    FileCases := 0;
+    DeclaredCases := -1;
     for I := 0 to Lines.Count - 1 do
     begin
       LineNo := I + 1;
+      CurrentWhere := ShortString(Format('%s:%d', [ExtractFileName(FileName), LineNo]));
       Line := Trim(Lines[I]);
+      if Line.StartsWith('# cases:') then
+        DeclaredCases := StrToInt(Trim(Copy(Line, 9, MaxInt)));
       if (Line = '') or Line.StartsWith('#') then
         Continue;
       if Line.StartsWith('[case ') and Line.EndsWith(']') then
@@ -318,9 +373,49 @@ begin
       end;
     end;
     FinishCase;
+    if DeclaredCases < 0 then
+    begin
+      Writeln(Format('FAIL %s: no "# cases: <n>" line', [ExtractFileName(FileName)]));
+      Inc(Stats.FileErrors);
+    end
+    else if DeclaredCases <> FileCases then
+    begin
+      Writeln(Format('FAIL %s: declares %d cases, contains %d', [ExtractFileName(FileName), DeclaredCases, FileCases]));
+      Inc(Stats.FileErrors);
+    end;
   finally
     Lines.Free;
   end;
+end;
+
+{ Recording. Steps are action lines; 'observe' writes what the form shows at that point. }
+
+procedure RecordCase(Runner: TCaseRunner; Lines: TStringList; const Id: string; const Steps: TArray<string>);
+var
+  S, O: string;
+begin
+  Lines.Add('');
+  Lines.Add('[case ' + Id + ']');
+  Runner.Restart;
+  for S in Steps do
+    if S = 'observe' then
+    begin
+      for O in Runner.Observe do
+        Lines.Add(O);
+    end
+    else
+    begin
+      Lines.Add(S);
+      Runner.Act(S);
+    end;
+end;
+
+procedure SaveRecording(Lines: TStringList; Count: Integer; const FileName: string);
+begin
+  Lines.Insert(0, '# Recorded from the ORIGINAL uMain.pas with "GoldenTests record".');
+  Lines.Insert(1, '# Never re-record after the refactoring: a change here means behavior changed.');
+  Lines.Insert(2, '# cases: ' + IntToStr(Count));
+  Lines.SaveToFile(FileName, TEncoding.UTF8);
 end;
 
 const
@@ -330,7 +425,7 @@ const
   GridNetto: array[0..12] of string = ('-1', '0', '0,01', '1', '70', '74', '82', '86', '90', '100',
     '860', '1234,56', '99999,99');
 
-// All combinations; class 0 = none picked. Each value is entered at once (set).
+// Calculation grid: all combinations, class 0 = none picked, each value entered at once (set)
 function RecordGrid(Runner: TCaseRunner; const FileName: string): Integer;
 var
   Lines: TStringList;
@@ -341,34 +436,22 @@ var
 
   procedure AddCase(const Pers: string; Klasse: Integer; Church: Boolean; const Field, Value: string);
   var
-    Actions: TArray<string>;
-    A: string;
+    Steps: TArray<string>;
   begin
     Inc(N);
-    Actions := ['set pers ' + Pers];
+    Steps := ['set pers ' + Pers];
     if Klasse > 0 then
-      Actions := Actions + ['class ' + IntToStr(Klasse)];
+      Steps := Steps + ['class ' + IntToStr(Klasse)];
     if Church then
-      Actions := Actions + ['church on'];
-    Actions := Actions + ['set ' + Field + ' ' + Value];
-    Lines.Add('');
-    Lines.Add(Format('[case g%.4d]', [N]));
-    Runner.Restart;
-    for A in Actions do
-    begin
-      Lines.Add(A);
-      Runner.Act(A);
-    end;
-    for A in Runner.Observe do
-      Lines.Add(A);
+      Steps := Steps + ['church on'];
+    Steps := Steps + ['set ' + Field + ' ' + Value, 'observe'];
+    RecordCase(Runner, Lines, Format('g%.4d', [N]), Steps);
   end;
 
 begin
   N := 0;
   Lines := TStringList.Create;
   try
-    Lines.Add('# Recorded from the ORIGINAL uMain.pas with "GoldenTests record".');
-    Lines.Add('# Never re-record after the refactoring: a change here means behavior changed.');
     for Pers in GridPers do
       for Klasse := 0 to 6 do
         for Church in [False, True] do
@@ -378,14 +461,60 @@ begin
           for Value in GridNetto do
             AddCase(Pers, Klasse, Church, 'netto', Value);
         end;
-    Lines.SaveToFile(FileName, TEncoding.UTF8);
+    SaveRecording(Lines, N, FileName);
   finally
     Lines.Free;
   end;
   Result := N;
 end;
 
-function RunGolden: Integer;
+// Event wiring: amount typed key by key, then every other control changes it, both directions,
+// with an observation after each step. Covers recalculation on church tax, class and employee
+// number changes, totals per keystroke, reset of the internal total, and the class picked late.
+function RecordSequence(Runner: TCaseRunner; const FileName: string): Integer;
+const
+  Pers: array[0..1] of string = ('1001', '1003');
+  Klassen: array[0..1] of Integer = (2, 3);
+  Fields: array[0..1] of string = ('brutto', 'netto');
+  Amounts: array[0..1] of string = ('1234,5', '860');
+var
+  Lines: TStringList;
+  P, K, F: Integer;
+  ClassFirst: Boolean;
+  Steps: TArray<string>;
+begin
+  Result := 0;
+  Lines := TStringList.Create;
+  try
+    for P := 0 to 1 do
+      for K := 0 to 1 do
+        for F := 0 to 1 do
+          for ClassFirst in [True, False] do
+          begin
+            Inc(Result);
+            Steps := ['type pers ' + Pers[P]];
+            if ClassFirst then
+              Steps := Steps + ['class ' + IntToStr(Klassen[K])];
+            Steps := Steps + ['type ' + Fields[F] + ' ' + Amounts[F], 'observe'];
+            if not ClassFirst then
+              Steps := Steps + ['class ' + IntToStr(Klassen[K]), 'observe'];
+            Steps := Steps + [
+              'church on', 'observe',
+              'church off', 'observe',
+              'class ' + IntToStr(Klassen[K] mod 6 + 1), 'observe',
+              'clear pers', 'type pers ' + Pers[1 - P], 'observe',
+              'reset', 'observe',
+              'church on', 'observe',
+              'clear ' + Fields[F], 'observe'];
+            RecordCase(Runner, Lines, Format('s%.2d', [Result]), Steps);
+          end;
+    SaveRecording(Lines, Result, FileName);
+  finally
+    Lines.Free;
+  end;
+end;
+
+function RunAll: Integer;
 var
   Runner: TCaseRunner;
   GoldenDir, F: string;
@@ -416,16 +545,24 @@ begin
       if SameText(ParamStr(1), 'record') then
       begin
         Writeln('Recorded ', RecordGrid(Runner, TPath.Combine(GoldenDir, 'grid.golden.txt')), ' grid cases');
+        Writeln('Recorded ', RecordSequence(Runner, TPath.Combine(GoldenDir, 'sequence.golden.txt')), ' sequence cases');
         Exit(0);
       end;
 
       Stats := Default(TStats);
+      for F in RequiredFiles do
+        if not FileExists(TPath.Combine(GoldenDir, F)) then
+        begin
+          Writeln('FAIL missing golden file ', F);
+          Inc(Stats.FileErrors);
+        end;
       Files := TDirectory.GetFiles(GoldenDir, '*.txt');
       TArray.Sort<string>(Files);
       for F in Files do
         RunFile(Runner, F, Stats);
-      Writeln(Format('%d cases in %d files, %d failed', [Stats.Cases, Length(Files), Stats.Failed]));
-      if (Stats.Failed = 0) and (Stats.Cases > 0) then
+      Writeln(Format('%d cases in %d files, %d failed, %d file errors',
+        [Stats.Cases, Length(Files), Stats.Failed, Stats.FileErrors]));
+      if (Stats.Failed = 0) and (Stats.FileErrors = 0) and (Stats.Cases > 0) then
       begin
         Writeln('RESULT: OK');
         Result := 0;
@@ -441,6 +578,20 @@ begin
   except
     on E: Exception do
       Writeln('ERROR: ', E.ClassName, ': ', E.Message);
+  end;
+end;
+
+function RunGolden: Integer;
+var
+  Watchdog: TWatchdog;
+begin
+  Watchdog := TWatchdog.Create(False);
+  try
+    Result := RunAll;
+  finally
+    Watchdog.Terminate;
+    Watchdog.WaitFor;
+    Watchdog.Free;
   end;
 end;
 

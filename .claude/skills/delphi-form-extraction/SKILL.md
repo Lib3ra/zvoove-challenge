@@ -37,9 +37,13 @@ Tests written after the refactoring only describe the new code. Pin the original
   - **grid**: all combinations of the inputs, recorded **once** from the original by the runner's `record` mode, in its own commit.
 - Assert **exact** text (`900,9`, the full label caption, dialog kind and text), never "not zero".
 - Modal dialogs: close them automatically and log kind + text, so check order and dialog type are tested too.
-- Pin the locale **before** units load data in `initialization` (first unit in the test program's `uses`). Same platform as the app (Win32 x87 and Win64 SSE can differ in the last cent).
-- One script runs everything and checks the runner's `RESULT:` line, not only the exit code (some compilers print an error and still exit 0).
+- **Trigger every event handler after an amount is entered**, toggles in both directions (on and off), and calculate again after a reset. A handler that never fires in a test can be broken without anything turning red. A recorded "sequence" file (type, then change each control, observe after each step) covers this.
+- Pin the locale **before** units load data in `initialization` (first unit in the test program's `uses`). Build for the same platform as the app; floating-point results may differ between Win32 and Win64.
+- One script runs everything and checks the runner's `RESULT:` line and exit code (some compilers print an error and still exit 0). It must **refuse a test exe older than the sources**: with IDE-only builds, a forgotten rebuild silently tests the old code.
+- Guard the golden files: each declares its case count, required files must exist, a hanging step (unhandled dialog) fails after a timeout.
 - All green on the original before you touch it. Commit.
+- Then let an **independent reviewer** (a fresh AI session or a colleague) look only for false greens: handlers never triggered, stale binaries, missing or truncated files, claims the tests don't back. Fix, re-record on the original if needed, commit.
+- Template: `tests/uGoldenRunner.pas` in this repo is reusable for another form; only `Field` (control names) and the recorded input values are form-specific.
 
 ## 4. Extract without changing behavior
 
