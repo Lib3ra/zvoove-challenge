@@ -4,7 +4,9 @@
 #     exits 0, so success is judged by the exe existing, not by the exit code.
 #  2. On Community Edition, uses the newest GoldenTests.exe built in the IDE, and refuses
 #     it if it is older than any source file (it would test old code).
-#  3. Passes only if the runner exits with 0 AND prints "RESULT: OK".
+#  3. Checks that the extracted core unit uses no UI units.
+#  4. Runs the exe twice (window mode and core mode); passes only if both exit with 0
+#     AND print "RESULT: OK".
 # Exit codes: 0 passed, 1 tests failed, 2 no usable test exe.
 
 $ErrorActionPreference = 'Stop'
@@ -48,13 +50,33 @@ if (-not $exe) {
   }
 }
 
-Write-Output "Running $($exe.FullName)"
-$output = & $exe.FullName
-$code = $LASTEXITCODE
-$output | Write-Output
-if ($code -eq 0 -and ($output -contains 'RESULT: OK')) {
+# The extracted core must not depend on the UI: no Vcl units and no dialogs in its uses clause
+$failed = $false
+$core = Get-Content (Join-Path $app 'uLohnrechnerCore.pas') -Raw
+$uses = [regex]::Matches($core, '(?s)\buses\b(.*?);') | ForEach-Object { $_.Groups[1].Value }
+if (($uses -join ' ') -match 'Vcl\.|Dialogs|uMain') {
+  Write-Output 'FAIL uLohnrechnerCore.pas uses UI units (Vcl, Dialogs or uMain)'
+  $failed = $true
+} else {
+  Write-Output 'uLohnrechnerCore.pas uses no UI units'
+}
+
+# Mode '' = every golden file against the real window; 'core' = the calculation grid
+# against the core without a window, plus the core unit tests
+foreach ($mode in @('', 'core')) {
+  Write-Output "Running $($exe.FullName) $mode"
+  $output = if ($mode) { & $exe.FullName $mode } else { & $exe.FullName }
+  $code = $LASTEXITCODE
+  $output | Write-Output
+  if ($code -ne 0 -or -not ($output -contains 'RESULT: OK')) {
+    Write-Output "FAILED: mode '$mode' (exit code $code)"
+    $failed = $true
+  }
+}
+
+if (-not $failed) {
   Write-Output 'TESTS PASSED'
   exit 0
 }
-Write-Output "TESTS FAILED (exit code $code)"
+Write-Output 'TESTS FAILED'
 exit 1
