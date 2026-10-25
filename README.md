@@ -24,7 +24,44 @@ The code was moved line by line with the same types and rounding. Every preserve
 
 ## How AI tools were used
 
-_To do._
+**Tool:** Claude Code (desktop app), as the main working session from start to end, with separate Claude sessions (subagents) for two independent reviews. All work went through git branches and pull requests, one per part, which I reviewed and merged.
+
+**Who did what:**
+- **The AI** wrote the code, the tests, the test runner and the docs, ran the test scripts, and proposed designs and next steps.
+- **I** decided: the order of work, what counts as business logic, the architecture choices (e.g. the annual total), what to cut. I clicked through the original app by hand to record its behavior (the expected test values come from there), built every Delphi project in the IDE (Community Edition can't compile from the command line), and reviewed and merged every pull request.
+
+### Key prompts
+
+1. **Tests before the extraction.** The first plan had tests after the refactoring. Reading the spec for Part 2, I asked:
+   > "part 2 is asking us to prove that we havent changed behavior. we can only prove that by showing what we tested at the start no? shouldnt we start with the tests, extract business logic and then run tests again?"
+   
+   This changed the whole approach: golden-file tests against the untouched original first, then the extraction with the same tests unchanged.
+2. **An independent check of the AI's own work.**
+   > "run a /review subagent in parallel so they can assess what we did and also sanity check it. should this be added to the skill?"
+   
+   Two reviews by separate sessions found real gaps (below). It's now a step in the Part 3 skill.
+3. **Deciding the architecture myself.** The AI proposed passing the annual total through the service API. I disagreed:
+   > "the total that is added up isnt that a client side "feature", the api should only return the result of a calculation and the client can do what it wants with that"
+   
+   That became decision D19: the service returns one calculation; the total stays a feature of the window.
+
+Also decisive: when the AI wanted to record the app's behavior by UI automation, I asked it to tell me what to expect and entered everything myself, so the expected values are my observations, not the AI's.
+
+### Where the AI was wrong, and how I noticed
+
+- **The skill had the steps in the wrong order.** The first draft of the Part 3 skill said "extract, then test". Tests written after a refactoring only describe the new code; they can't prove nothing changed. *Noticed by me*, comparing the plan with Part 2 of the spec, before any code was written. Fixed in the skill (7f57964).
+- **Wrong references in its own quirk comments.** Three of the `QUIRK (deliberately not fixed)` comments the AI wrote cited the wrong row of the behavior record, e.g. a row "#4" that doesn't exist. The code was right; the comments looked plausible. *Noticed by the independent review*, which checked every reference against `docs/uMain-behavior.md`; I verified each finding before it was fixed (6813a72).
+- **Code that didn't compile, twice in a row.** In the Part 4 contract unit the AI put JSON examples inside a Delphi `{ }` comment; the first `}` of the JSON ended the comment, and the rest of the file was read as code. Its fix then contained a literal `*)` inside the new `(* *)` comment, which closed that one early. *Noticed by the compiler* when I built in the IDE. The AI could not compile anything itself, so every claim of "should work" was only true after my build.
+
+Smaller ones of the same kind: a guess presented as fact (that Win64 would give different cents; never verified, now worded as untested), and instructions for running the test exe that didn't work in PowerShell.
+
+### What I would never let AI do unchecked
+
+- **Define expected values.** If the AI computes what the right result is, the tests pin the AI's mistake. Here they came from my click-through of the running original or were recorded from the original code.
+- **Change golden files or "fix" behavior.** Re-recording a golden file to make tests pass would hide exactly the regression the tests exist for. Same for quietly fixing a quirk the task says to keep.
+- **Report "it builds" or "tests pass" without the output.** The AI couldn't compile, so every build was mine, in the IDE. Test results in this README come from actual test output, not from a description of it; after each key step I ran the suite in my own terminal.
+- **Make the design decisions.** What is business logic, what the service returns, what to cut: the AI proposed, I decided, and the reasons are in `docs/decisions.md`.
+- **Merge its own work.** Every part went through a pull request I reviewed.
 
 ## Tests: how to run them and what they prove
 
@@ -161,4 +198,18 @@ Specification, examples and how to check another implementation: [`docs/service-
 
 ## What was cut or not finished
 
-_To do._
+**Not done:**
+- **Bonus port** to another language. Prepared but not built: the contract and `cases.json` from Part 4 are exactly the shared test data the bonus asks for. A C# minimal API behind the same contract was the planned next step; it needs a .NET SDK, which isn't installed on the machine. One thing to expect: the lost-cent quirk comes from Delphi's 80-bit intermediate floating point, so a port using 64-bit `double` may differ in the last cent for some cases, and `cases.json` would show exactly which.
+- **Part 4 steps 2 and 3** (service-safe data loading; hosting). By design: only the slice of step 1 was required.
+
+**Cut on purpose, with the risk stated:**
+- **Golden recordings for unusual input and other environments.** No recorded cases for input like `1.000`, `1E3` or more than 4 decimals, for overflow with huge amounts, or for the window under English number format or without `personal.dat`. The extraction moved the code unchanged, so I judged these not worth the time (decision D18).
+- **The rule "update the total label only after a successful calculation"** is protected by a source comment, not by a test: it only makes a visible difference under English number format.
+- **A demo command-line program** for the service contract (JSON in, JSON out). Nice for showing, not needed by the next steps (D21).
+
+**Not verified:**
+- **Rows 8 and 9b** of the behavior record (missing `personal.dat`, the reset text) were not checked in the running app; their expectations come from reading the code.
+- **Only the Debug build is tested**, the configuration the app was observed in, not an optimized Release build.
+- **No CI.** Community Edition can't compile from the command line, so tests run locally against an exe built in the IDE (`run-tests.bat` refuses a stale one).
+
+**Size of the Part 3 skill:** about 1,030 words, short when rendered but more than one printed page. Kept as is: every part of it was used.
