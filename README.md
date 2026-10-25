@@ -199,7 +199,7 @@ Specification, examples and how to check another implementation: [`docs/service-
 ## What was cut or not finished
 
 **Not done:**
-- **Bonus port** to another language. Prepared but not built: the contract and `cases.json` from Part 4 are exactly the shared test data the bonus asks for. A C# minimal API behind the same contract was the planned next step; it needs a .NET SDK, which isn't installed on the machine. One thing to expect: the lost-cent quirk comes from Delphi's 80-bit intermediate floating point, so a port using 64-bit `double` may differ in the last cent for some cases, and `cases.json` would show exactly which.
+- **Bonus port (C#), built but not handed in.** A C# minimal API exists in PR #7 and passes the same `cases.json` (1680/1680, in-process and over HTTP). Matching Delphi's lost cent required emulating its 80-bit floating point. I haven't reviewed that PR myself yet, so I'm not counting it as part of the submission.
 - **Part 4 steps 2 and 3** (service-safe data loading; hosting). By design: only the slice of step 1 was required.
 
 **Cut on purpose, with the risk stated:**
