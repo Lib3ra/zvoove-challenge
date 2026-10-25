@@ -93,8 +93,9 @@ The Delphi app has one window (`uMain.pas` + `uMain.dfm`, like a WinForms view w
 - **Not changed:** `uPersonalstamm` itself (global object, loads at start, locale-dependent). It is data access, already UI-free; changing it is outside "separate logic from UI" and would risk behavior changes.
 
 ## D16 What stays in the window
-**Proposed.** Reading and parsing the input fields (incl. "non-numeric employee number becomes 0"), formatting results (`CurrToStr`, the total label, the hard-coded reset text), showing dialogs, the re-entrancy guard, and "recalculate from Brutto whenever a field changes".
-- **Why:** these are presentation choices. A web UI would make its own; the core should not dictate them.
+**Proposed.** These lines stay in the window **unchanged**: reading and parsing the input fields, formatting results (`CurrToStr`, the total label, the hard-coded reset text), showing dialogs, the re-entrancy guard, and "recalculate from Brutto whenever a field changes".
+- **Nothing new is introduced here.** Example: the original already turns a non-numeric employee number into 0 (`uMain.pas:136-137`, quirk 7, observed in row 7a). That code stays where it is; the core receives a number.
+- **Why in the window, not the core:** these are presentation choices tied to text fields. A web API receives numbers from JSON, where "abc" can't occur, and decides itself how to reject bad input. Moving the parsing into the core would force that UI quirk on every future caller.
 
 ## D17 Proof for Part 1
 **Proposed.**
