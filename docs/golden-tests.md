@@ -101,13 +101,13 @@ After the extraction the runner has two "drivers" behind the same file reader:
 - **`TFormDriver`** (default mode): the real window, as described above. Runs all three golden files.
 - **`TCoreDriver`** (`GoldenTests core`): no window at all. It holds the field texts as plain strings and calls `TLohnrechner` directly through a small adapter: parse the text, call the core with all inputs, format the result, turn an error kind into `message`/`warning`. That is exactly what any other caller would do. It runs only `grid.golden.txt` (the calculation cases, entered with `set`); typing and field-change wiring only exist in the window.
 
-Both must reproduce the original results. Core mode also runs 10 unit tests (`uCoreTests.pas`) for what the window can't reach, such as a missing data file (lookup returns 0) and the annual total as a number.
+Both must reproduce the original results. Core mode also runs 11 unit tests (`uCoreTests.pas`) for what the window can't reach, such as a missing data file (lookup returns 0) and the annual total as a number.
 
 A future web API would get a third driver of the same shape: map `set brutto 1000` to a request, map error kinds to HTTP errors, compare numbers instead of German text.
 
 ## Proven after the extraction
 
-- Same golden files, unchanged: 1717 window cases green; 1680 core cases + 10 unit tests green.
+- Same golden files, unchanged: 1717 window cases green; 1680 core cases + 11 unit tests green.
 - Deliberate break: `Round` instead of `Trunc` in the core's net → gross ("fixing" the lost cent). 320 window cases, 314 core cases and 1 unit test failed. Reverted.
 - Watchdog: `GoldenTests selftest-watchdog` opens a Windows message box the runner can't close; the watchdog ended the process after 10.2 s with exit code 1.
 

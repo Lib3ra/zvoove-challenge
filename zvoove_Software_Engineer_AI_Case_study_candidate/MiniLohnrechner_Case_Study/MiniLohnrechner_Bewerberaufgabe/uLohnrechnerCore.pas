@@ -69,6 +69,9 @@ end;
 
 class function TLohnrechner.Steuersatz(Klasse: Integer): Double;
 begin
+  // QUIRK (deliberately not fixed): a class outside 1..6 (e.g. 7 or -1) is not an error, it is
+  // taxed at rate 0. The window can only pass 0..6; other callers can pass anything. From the
+  // code, not observable in the window - pinned by core unit test ClassOutOfRangeIsTaxFree
   if (Klasse < 1) or (Klasse > 6) then
     Result := 0
   else
@@ -110,7 +113,8 @@ begin
     KiSt := 0;
 
   // QUIRK (deliberately not fixed): Trunc cuts off the third decimal instead of rounding;
-  // Steuer and KiSt are Currency, so Currency * Double is rounded to 4 decimals first - see #4
+  // Steuer and KiSt are Currency, so Currency * Double is rounded to 4 decimals first. From the
+  // code; the net path has no behavior-record row, it is pinned by grid.golden.txt
   Result.Betrag := Trunc((Brutto - Steuer - KiSt) * 100) / 100;
 
   // QUIRK (deliberately not fixed): every successful net calculation adds to the annual total.
@@ -128,7 +132,8 @@ begin
   Result.Betrag := 0;
   Result.Fehler := lfKeiner;
 
-  // QUIRK (deliberately not fixed): same check order as BerechneNetto, class before sign - see #5b, #5d
+  // QUIRK (deliberately not fixed): same check order as BerechneNetto, class before sign - see
+  // grid.golden.txt case g0348 (no class, Netto -1: class message); #5d covers the sign check
   if Steuerklasse = 0 then
   begin
     Result.Fehler := lfKeineSteuerklasse;

@@ -60,6 +60,7 @@ The Delphi app has one window (`uMain.pas` + `uMain.dfm`, like a WinForms view w
 ## D10 Independent review of the tests before relying on them
 **Decided.** A separate AI session reviewed the test PR, looking only for ways the tests could pass while behavior changed.
 - **Why:** the author of tests is blind to their gaps. It found real ones: church-tax recalculation and the internal reset were never exercised; a stale exe or a deleted golden file could pass; a hang would block forever. All fixed and verified.
+- **Repeated for the extraction PR**, focused on behavior changes and false greens: no behavior change found (side-effect order, label rule, exceptions, floating point, object lifetime all checked). It found three wrong row references in the AI-written quirk comments, an unmarked quirk (tax class outside 1..6 is taxed at rate 0), and a bypassable no-UI check. All fixed.
 
 ## D11 The annual total belongs to the core, not the window
 **Decided.**
@@ -94,7 +95,7 @@ The Delphi app has one window (`uMain.pas` + `uMain.dfm`, like a WinForms view w
 
 ## D16 What stays in the window
 **Decided.** These lines stay in the window **unchanged**: reading and parsing the input fields, formatting results (`CurrToStr`, the total label, the hard-coded reset text), showing dialogs, the re-entrancy guard, and "recalculate from Brutto whenever a field changes".
-- **Nothing new is introduced here.** Example: the original already turns a non-numeric employee number into 0 (`uMain.pas:136-137`, quirk 7, observed in row 7a). That code stays where it is; the core receives a number.
+- **Nothing new is introduced here.** Example: the original already turns a non-numeric employee number into 0 (original `uMain.pas:136-137`, now lines 92-93; quirk 7, observed in row 7a). That code stays where it is; the core receives a number.
 - **Why in the window, not the core:** these are presentation choices tied to text fields. A web API receives numbers from JSON, where "abc" can't occur, and decides itself how to reject bad input. Moving the parsing into the core would force that UI quirk on every future caller.
 - **Test used to draw the line:** "Would a web API caller need the same rule?" Yes → business logic → core (e.g. "gross must not be negative"). No, it only exists because the input is a text field → window (is `abc` a number, German comma, label decimals).
 - **Likely objection:** "invalid input silently means no allowance" sounds like a business policy. The policy ("no known employee → allowance 0") stays in the allowance lookup and applies to every caller; only the text-to-number conversion stays in the window. Together they give exactly today's result.
@@ -105,7 +106,7 @@ The Delphi app has one window (`uMain.pas` + `uMain.dfm`, like a WinForms view w
 2. A second test mode replays the 1680 calculation cases **directly against the core**, without the window.
 3. Unit tests for what the window tests can't reach: missing data file, unknown employee.
 4. Deliberately break one rule in the core, confirm the tests go red, revert.
-- **Result:** 1 and 2 green (1717 window cases; 1680 core cases + 10 core unit tests). Breaking the core by "fixing" the lost cent (`Round` instead of `Trunc`) failed 320 window cases, 314 core cases and 1 unit test; reverted. The watchdog was proven with a self-test mode. A check in `run-tests` fails if the core ever uses window or dialog units.
+- **Result:** 1 and 2 green (1717 window cases; 1680 core cases + 11 core unit tests, the 11th added after the review of this PR). Breaking the core by "fixing" the lost cent (`Round` instead of `Trunc`) failed 320 window cases, 314 core cases and 1 unit test; reverted. The watchdog was proven with a self-test mode. A check in `run-tests` fails if the core ever uses window or dialog units.
 
 ## D18 No extra golden files for edge inputs and environment variants
 **Decided.** Considered right before the extraction (the last clean moment to record from the original), and skipped.

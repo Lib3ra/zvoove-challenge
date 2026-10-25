@@ -5,7 +5,8 @@ unit uCoreTests;
   returns 0), the lookup being passed in, and the core's results and total as
   numbers rather than formatted text.
   Expected values come from the original app, never computed here: the row of
-  docs/uMain-behavior.md or the case id in grid.golden.txt is named in each test. }
+  docs/uMain-behavior.md or the case id in grid.golden.txt is named in each test.
+  One exception, marked as such: ClassOutOfRangeIsTaxFree (not reachable in the window). }
 
 interface
 
@@ -132,7 +133,8 @@ begin
   end;
 end;
 
-// Row 5b: negative amount without a class reports the missing class (class checked first)
+// Negative amount without a class reports the missing class (class checked first):
+// row 5b for gross -> net, grid case g0348 for net -> gross
 procedure ClassIsCheckedBeforeSign;
 var
   R: TLohnrechner;
@@ -232,6 +234,30 @@ begin
   end;
 end;
 
+// The only test whose expected values come from the code, not the app: the window can only
+// pass classes 0..6, so this was never observable. Original Steuersatz returns rate 0 outside
+// 1..6, which makes net = gross and gross = net for an employee without allowance (1002).
+procedure ClassOutOfRangeIsTaxFree;
+var
+  R: TLohnrechner;
+  E: TLohnErgebnis;
+begin
+  R := TLohnrechner.Create(RealLookup());
+  try
+    E := R.BerechneNetto(1000, 1002, 7, False);
+    ExpectFehler(E.Fehler, lfKeiner);
+    ExpectCurr(E.Betrag, 1000, 'net, class 7');
+    E := R.BerechneNetto(1000, 1002, -1, False);
+    ExpectFehler(E.Fehler, lfKeiner);
+    ExpectCurr(E.Betrag, 1000, 'net, class -1');
+    E := R.BerechneBrutto(1000, 1002, 7, False);
+    ExpectFehler(E.Fehler, lfKeiner);
+    ExpectCurr(E.Betrag, 1000, 'gross, class 7');
+  finally
+    R.Free;
+  end;
+end;
+
 procedure Run(const Name: string; Test: TProc; var Cases, Failed: Integer);
 begin
   TestName := Name;
@@ -261,6 +287,7 @@ begin
   Run('GrossPathLosesCents', GrossPathLosesCents, Cases, Failed);
   Run('InverseIgnoresClamp', InverseIgnoresClamp, Cases, Failed);
   Run('TotalAccumulatesAndResets', TotalAccumulatesAndResets, Cases, Failed);
+  Run('ClassOutOfRangeIsTaxFree', ClassOutOfRangeIsTaxFree, Cases, Failed);
 end;
 
 end.

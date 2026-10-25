@@ -4,7 +4,7 @@
 #     exits 0, so success is judged by the exe existing, not by the exit code.
 #  2. On Community Edition, uses the newest GoldenTests.exe built in the IDE, and refuses
 #     it if it is older than any source file (it would test old code).
-#  3. Checks that the extracted core unit uses no UI units.
+#  3. Checks that the extracted core unit only uses System units (no UI).
 #  4. Runs the exe twice (window mode and core mode); passes only if both exit with 0
 #     AND print "RESULT: OK".
 # Exit codes: 0 passed, 1 tests failed, 2 no usable test exe.
@@ -50,15 +50,25 @@ if (-not $exe) {
   }
 }
 
-# The extracted core must not depend on the UI: no Vcl units and no dialogs in its uses clause
+# The extracted core must not depend on the UI. Allow-list: its uses clauses may only name
+# System units (System, System.SysUtils, ...). Comments are removed first so they can't hide
+# or end a uses clause. Only direct dependencies are checked, not units used by those units.
+function Get-UsedUnits([string]$path) {
+  $src = Get-Content $path -Raw
+  $src = [regex]::Replace($src, '(?s)\{.*?\}|\(\*.*?\*\)|//[^\r\n]*', ' ')
+  foreach ($m in [regex]::Matches($src, '(?is)\buses\b(.*?);')) {
+    foreach ($part in $m.Groups[1].Value.Split(',')) {
+      ($part -replace "(?is)\bin\s+'[^']*'", '').Trim()
+    }
+  }
+}
 $failed = $false
-$core = Get-Content (Join-Path $app 'uLohnrechnerCore.pas') -Raw
-$uses = [regex]::Matches($core, '(?s)\buses\b(.*?);') | ForEach-Object { $_.Groups[1].Value }
-if (($uses -join ' ') -match 'Vcl\.|Dialogs|uMain') {
-  Write-Output 'FAIL uLohnrechnerCore.pas uses UI units (Vcl, Dialogs or uMain)'
+$notAllowed = @(Get-UsedUnits (Join-Path $app 'uLohnrechnerCore.pas') | Where-Object { $_ -notmatch '^System(\.|$)' })
+if ($notAllowed.Count -gt 0) {
+  Write-Output "FAIL uLohnrechnerCore.pas uses units outside System: $($notAllowed -join ', ')"
   $failed = $true
 } else {
-  Write-Output 'uLohnrechnerCore.pas uses no UI units'
+  Write-Output 'uLohnrechnerCore.pas uses only System units (no UI)'
 }
 
 # Mode '' = every golden file against the real window; 'core' = the calculation grid

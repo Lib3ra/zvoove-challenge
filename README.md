@@ -54,7 +54,9 @@ They were **written and passing before any refactoring**, against the unmodified
 
 The extracted core is also tested **on its own**, without any window:
 - **Core mode** replays the 1680 calculation cases directly against `TLohnrechner`, through a small adapter that does what any other caller (e.g. a web API) would do: parse, call, format. This shows another caller can use the logic unchanged.
-- **10 core unit tests** (`tests/uCoreTests.pas`): missing data file (lookup returns 0), the lookup being passed in, unknown employee, every error with its text and the check order, the lost cent, the negative gross, the annual total and reset. Expected values come from the behavior record or recorded cases, each named in the test.
+- **11 core unit tests** (`tests/uCoreTests.pas`): missing data file (lookup returns 0), the lookup being passed in, unknown employee, every error with its text and the check order, the lost cent, the negative gross, the annual total and reset. Expected values come from the behavior record or recorded cases, each named in the test. One exception, marked as such: a tax class outside 1..6 (e.g. 7) is taxed at rate 0 without an error. The window can't produce it, so the expected values come from the code; it matters for future callers such as a web API.
+
+Core mode proves the core on its own; **only window mode proves the window**. The core-mode adapter is a copy of the *new* window handlers, so a mistake shared by both would pass core mode. It would still fail window mode, whose expected values come from the original.
 
 Three golden files in `MiniLohnrechner_Bewerberaufgabe\tests\golden\`:
 
@@ -68,13 +70,14 @@ The recorded files are made with `GoldenTests record` on the unmodified original
 
 - **Exact comparisons.** `900,9` is not `900,90`, a lost cent fails, a different dialog type fails. This catches behavior changes, not just compile errors.
 - **The suite catches a real behavior change:** we deliberately "fixed" the lost cent in the core (`Round` instead of `Trunc` in net → gross). Result: 320 window cases and 314 core cases failed, including the hand-observed cases, plus the unit test for lost cents; exit code 1. Then reverted.
-- **Guards against false greens:** every golden file must exist and contain the number of cases it declares; a step that hangs (e.g. a dialog the runner can't close) fails the run after 10 seconds (proven with `GoldenTests selftest-watchdog`: ended after 10.2 s with exit code 1); a stale exe is refused; the core may not use window or dialog units.
+- **Guards against false greens:** every golden file must exist and contain the number of cases it declares; a step that hangs (e.g. a dialog the runner can't close) fails the run after 10 seconds (proven with `GoldenTests selftest-watchdog`: ended after 10.2 s with exit code 1); a stale exe is refused; the core may only use `System` units (an allow-list, checked after removing comments; units used indirectly by those are not checked).
 - **Pinned environment:** the German number format is set before `personal.dat` is loaded, so results don't depend on the machine's regional settings. Built and run as Win32, like the app. Whether Win64 would give different cents was not checked.
 
 ### What they do not prove
 
 - The window with a **missing `personal.dat`** or a **non-German regional format**: the data file is loaded once per test process with the pinned format. The core's side of "no data" (allowance 0) is unit-tested; the file loading itself (`uPersonalstamm`, unchanged) and the English-format display are not. The window's rule "update the total label only after a success" only differs under English format, so it is protected by a source comment, not a test.
 - Unusual input (`1.000`, `1E3`, more than 4 decimals) and overflow with huge amounts were not recorded (decision D18).
+- Only the Debug build is tested, the configuration the app was observed in. An optimized Release build was not tested; floating-point results could in theory differ there.
 - Typing is simulated by appending or removing characters at the end. Editing in the middle of a field, selecting text, or focus changes are not simulated.
 - Visual details of the form (layout, dialog icons, buttons).
 

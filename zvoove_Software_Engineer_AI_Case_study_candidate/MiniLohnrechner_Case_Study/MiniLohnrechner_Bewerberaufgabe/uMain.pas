@@ -124,7 +124,8 @@ begin
   FUpdating := True;
   try
     // QUIRK (deliberately not fixed): parsing uses the machine's number format, so "250,00"
-    // only parses with a German decimal separator - see #9a
+    // only parses with a German decimal separator. From the code; #9a observed the same
+    // parsing for personal.dat, not for this field
     if TryStrToCurr(editBrutto.Text, Brutto) then
     begin
       // Runs on every keystroke: errors show their dialog again each time - see #1, #5a
