@@ -96,6 +96,8 @@ The Delphi app has one window (`uMain.pas` + `uMain.dfm`, like a WinForms view w
 **Proposed.** These lines stay in the window **unchanged**: reading and parsing the input fields, formatting results (`CurrToStr`, the total label, the hard-coded reset text), showing dialogs, the re-entrancy guard, and "recalculate from Brutto whenever a field changes".
 - **Nothing new is introduced here.** Example: the original already turns a non-numeric employee number into 0 (`uMain.pas:136-137`, quirk 7, observed in row 7a). That code stays where it is; the core receives a number.
 - **Why in the window, not the core:** these are presentation choices tied to text fields. A web API receives numbers from JSON, where "abc" can't occur, and decides itself how to reject bad input. Moving the parsing into the core would force that UI quirk on every future caller.
+- **Test used to draw the line:** "Would a web API caller need the same rule?" Yes → business logic → core (e.g. "gross must not be negative"). No, it only exists because the input is a text field → window (is `abc` a number, German comma, label decimals).
+- **Likely objection:** "invalid input silently means no allowance" sounds like a business policy. The policy ("no known employee → allowance 0") stays in the allowance lookup and applies to every caller; only the text-to-number conversion stays in the window. Together they give exactly today's result.
 
 ## D17 Proof for Part 1
 **Proposed.**
