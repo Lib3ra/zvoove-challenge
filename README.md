@@ -39,8 +39,8 @@ From the repository root (cmd or PowerShell):
 - With a licensed Delphi (command-line compiler available), the script builds `tests\GoldenTests.dpr` for Win32 and runs it.
 - **Delphi Community Edition cannot compile from the command line.** Its `dcc32` prints an error and still exits with 0. So the script checks whether the exe exists, not the exit code, and then uses the newest `GoldenTests.exe` built in the IDE. To build it: open `MiniLohnrechner_Bewerberaufgabe\tests\GoldenTests.dpr`, platform **Win32**, Build.
 - **It refuses a stale exe:** if any `.pas`, `.dfm` or `.dpr` file is newer than the IDE-built exe, it stops with "rebuild" instead of testing old code.
-- It checks that `uLohnrechnerCore.pas` uses no window or dialog units, then runs the test exe twice: **window mode** (all golden files against the real window) and **core mode** (the calculation grid against the core without any window, plus core unit tests).
-- It passes only if both runs exit with 0 **and** print `RESULT: OK`. Exit code 0 = passed, 1 = failures (each printed with file, line, case and expected vs. actual), 2 = no usable test exe.
+- It checks that the core and the contract wrapper use no window or dialog units, then runs the test exe three times: **window mode** (all golden files against the real window), **core mode** (the calculation grid against the core without any window, plus core unit tests) and **contract mode** (the Part 4 service contract, see below).
+- It passes only if all runs exit with 0 **and** print `RESULT: OK`. Exit code 0 = passed, 1 = failures (each printed with file, line, case and expected vs. actual), 2 = no usable test exe.
 - The logic is in `run-tests.ps1`; `run-tests.bat` only calls it.
 - Developed and run with Delphi 13 Community Edition, built in the IDE.
 
@@ -70,7 +70,7 @@ The recorded files are made with `GoldenTests record` on the unmodified original
 
 - **Exact comparisons.** `900,9` is not `900,90`, a lost cent fails, a different dialog type fails. This catches behavior changes, not just compile errors.
 - **The suite catches a real behavior change:** we deliberately "fixed" the lost cent in the core (`Round` instead of `Trunc` in net → gross). Result: 320 window cases and 314 core cases failed, including the hand-observed cases, plus the unit test for lost cents; exit code 1. Then reverted.
-- **Guards against false greens:** every golden file must exist and contain the number of cases it declares; a step that hangs (e.g. a dialog the runner can't close) fails the run after 10 seconds (proven with `GoldenTests selftest-watchdog`: ended after 10.2 s with exit code 1); a stale exe is refused; the core may only use `System` units (an allow-list, checked after removing comments; units used indirectly by those are not checked).
+- **Guards against false greens:** every golden file must exist and contain the number of cases it declares; a step that hangs (e.g. a dialog the runner can't close) fails the run after 10 seconds (proven with `GoldenTests selftest-watchdog`: ended after 10.2 s with exit code 1); a stale exe is refused; the core may only use `System` units and the contract wrapper only `System` units plus the core (an allow-list, checked after removing comments; units used indirectly by those are not checked).
 - **Pinned environment:** the German number format is set before `personal.dat` is loaded, so results don't depend on the machine's regional settings. Built and run as Win32, like the app. Whether Win64 would give different cents was not checked.
 
 ### What they do not prove
@@ -116,9 +116,48 @@ It was written **before Part 1** and then followed step by step. Each step produ
 - **Without AI:** read it top to bottom as a checklist. Step 1 and the "never accept" list matter most.
 - **Test template:** `tests/uGoldenRunner.pas` is reusable for another form. Only the control names in `Field` and the recorded input values are form-specific; the file format, dialog catcher, watchdog and record/verify modes stay the same. How it works: [`docs/golden-tests.md`](docs/golden-tests.md).
 
-## Next steps (Part 4)
+## Next steps towards a standalone service (Part 4)
 
-_To do._
+The target architecture isn't decided, so I don't guess it. These are my assumptions, and the steps are chosen to be right whatever is decided later.
+
+### Assumptions
+
+- **A1** "Standalone service" means: other programs (e.g. a future web frontend) call the payroll calculation over a network instead of it being built into the Delphi window.
+- **A2** Behavior stays identical, quirks included, until the business explicitly decides otherwise.
+- **A3** The Delphi app keeps working throughout; nothing is switched off before its replacement is proven.
+- **A4** Target stack and hosting are open (Delphi service, port to another language, cloud or on-premises).
+- **A5** In a service, employee data won't come from a `personal.dat` next to an exe; where it comes from is open.
+- **A6** The service returns the result of **one calculation**. The window's annual total is a UI session counter, not part of the service; a real annual total per employee and year would be a new feature.
+- **A7** A web frontend is not a step towards the service; it comes after the service exists.
+
+### The three most important next steps, ranked
+
+1. **Define the service contract and make the proof portable.** A language-neutral request/response for one calculation, and the golden calculation cases as neutral test data, proven lossless against the recordings. *First, because every option in A4 needs exactly this and it depends on no open decision. Today's golden files speak "window" (German commas, dialog types), so a service can't be checked against them.*
+2. **Remove the hidden dependencies that break as a service.** Employee data is loaded at program start, from the exe's folder, with the machine's number format. On an English server every allowance would silently be 0. Make data source and number format explicit and replaceable, with the Delphi app passing exactly what it does today. *Second, because it's the biggest risk of any server deployment, and making it replaceable needs no decision on the final data source.*
+3. **Host the core behind the contract, then migrate callers.** A thin network layer that replays the neutral cases over the network; then the Delphi app switches to the service behind a fallback, and a frontend can follow. If the stack isn't Delphi, the port happens here, checked by the same cases. *Last, because it depends on the open stack decision; steps 1 and 2 make it low-risk.*
+
+In one sentence: first make the behavior **checkable** outside the window, then **safe to run on a server**, then **host it and move callers over**.
+
+### The slice built: step 1
+
+- **Contract wrapper** `MiniLohnrechner_Bewerberaufgabe/uLohnrechnerVertrag.pas`: JSON request in, JSON response out, around the unchanged core. Stable error codes (`NO_TAX_CLASS`, `NEGATIVE_GROSS`, `NEGATIVE_NET`) instead of dialogs, amounts as decimal strings so no stack loses a cent, a fresh core per call (stateless). No business logic, only `System` units.
+- **Neutral test data** `tests/golden/contract/cases.json`: all 1680 recorded calculation cases as request + expected response, generated from `grid.golden.txt`. Any implementation in any stack can be checked against it.
+- **Proof**, part of `.\run-tests.bat` (third run, `contract`):
+  - **round trip:** every case translated into the contract and back into the window's format equals the recorded golden lines byte for byte. `cases.json` says exactly what the original app showed.
+  - **freshness:** `cases.json` is exactly what the converter generates (no hand edits, not stale).
+  - **contract function:** all 1680 requests through the wrapper give the expected response.
+  - **invalid requests:** malformed requests are rejected with `INVALID_REQUEST`, the one new behavior (the window never receives JSON).
+
+Specification, examples and how to check another implementation: [`docs/service-contract.md`](docs/service-contract.md). Reasons: [`docs/decisions.md`](docs/decisions.md) D19–D21.
+
+**Deliberately not in the slice:** hosting (step 3), the data source (step 2), the annual total (A6), and a small command-line program for live demos (useful, but not needed by the next steps).
+
+### Open questions for the team
+
+- Where does employee data come from in a service (A5)?
+- Is a real annual total per employee and year wanted (A6)?
+- Which stack and hosting (A4)?
+- Should any quirk ever be fixed? That's a business decision per quirk, with golden files and `cases.json` deliberately updated.
 
 ## What was cut or not finished
 
