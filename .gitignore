@@ -85,3 +85,9 @@ __recovery/
 **/tests/Win64/
 **/tests/personal.dat
 **/tests/GoldenTests.res
+
+# .NET port (bonus): build output and IDE state
+port/**/bin/
+port/**/obj/
+port/.vs/
+*.user
