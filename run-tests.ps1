@@ -4,8 +4,8 @@
 #     exits 0, so success is judged by the exe existing, not by the exit code.
 #  2. On Community Edition, uses the newest GoldenTests.exe built in the IDE, and refuses
 #     it if it is older than any source file (it would test old code).
-#  3. Checks that the extracted core unit only uses System units (no UI).
-#  4. Runs the exe twice (window mode and core mode); passes only if both exit with 0
+#  3. Checks that the core and the contract wrapper use no UI units (allow-list).
+#  4. Runs the exe three times (window, core and contract mode); passes only if all exit with 0
 #     AND print "RESULT: OK".
 # Exit codes: 0 passed, 1 tests failed, 2 no usable test exe.
 
@@ -63,17 +63,25 @@ function Get-UsedUnits([string]$path) {
   }
 }
 $failed = $false
-$notAllowed = @(Get-UsedUnits (Join-Path $app 'uLohnrechnerCore.pas') | Where-Object { $_ -notmatch '^System(\.|$)' })
-if ($notAllowed.Count -gt 0) {
-  Write-Output "FAIL uLohnrechnerCore.pas uses units outside System: $($notAllowed -join ', ')"
-  $failed = $true
-} else {
-  Write-Output 'uLohnrechnerCore.pas uses only System units (no UI)'
+# Unit -> pattern of allowed units. The contract wrapper (Part 4) may also use the core.
+$allowed = [ordered]@{
+  'uLohnrechnerCore.pas'    = '^System(\.|$)'
+  'uLohnrechnerVertrag.pas' = '^(System(\.|$)|uLohnrechnerCore$)'
+}
+foreach ($unit in $allowed.Keys) {
+  $notAllowed = @(Get-UsedUnits (Join-Path $app $unit) | Where-Object { $_ -notmatch $allowed[$unit] })
+  if ($notAllowed.Count -gt 0) {
+    Write-Output "FAIL $unit uses units that are not allowed: $($notAllowed -join ', ')"
+    $failed = $true
+  } else {
+    Write-Output "$unit uses only allowed units (no UI)"
+  }
 }
 
 # Mode '' = every golden file against the real window; 'core' = the calculation grid
-# against the core without a window, plus the core unit tests
-foreach ($mode in @('', 'core')) {
+# against the core without a window, plus the core unit tests; 'contract' = the Part 4
+# service contract against golden\contract\cases.json
+foreach ($mode in @('', 'core', 'contract')) {
   Write-Output "Running $($exe.FullName) $mode"
   $output = if ($mode) { & $exe.FullName $mode } else { & $exe.FullName }
   $code = $LASTEXITCODE
