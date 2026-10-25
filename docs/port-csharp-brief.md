@@ -1,6 +1,8 @@
 # Brief: C# port as a minimal API (bonus)
 
-Handover for the session that implements the port on a machine with the .NET SDK. Branch: `port-csharp`. Everything needed is in this file and the documents it links; read them before writing code.
+Handover for the session that implements the port on a **Mac** with the .NET SDK. Branch: `port-csharp`. Everything needed is in this file and the documents it links; read them before writing code.
+
+**Platform split:** the Delphi app, its tests and `run-tests.ps1`/`.bat` are Windows-only and already verified there. They don't need to run on the Mac. The port must build and test on macOS with plain `dotnet` commands. Wiring it into `run-tests.ps1` happens afterwards on the Windows machine (see "Deliver").
 
 ## Goal
 
@@ -53,7 +55,7 @@ The Delphi code runs as **Win32**: floating-point math uses the x87 FPU with **8
 
 Error texts, byte for byte: `Bitte zuerst eine Steuerklasse waehlen.`, `Brutto darf nicht negativ sein.`, `Netto darf nicht negativ sein.` (ASCII, no umlauts).
 
-Allowances (`personal.dat`): lines `employeeNumber;amount`, amount with a **German decimal comma** (`1001;250,00`). Parse it explicitly with German format (`de-DE` or a comma-aware parser), not the machine culture: the original's locale dependence (quirk 9a) is a Part 4 step 2 problem, not something to port. Lines that don't parse are skipped silently, a missing file means all allowances 0 (quirks 8, 9a). Point the port at the repository's `personal.dat`; don't copy the data into code.
+Allowances (`personal.dat`): lines `employeeNumber;amount`, amount with a **German decimal comma** (`1001;250,00`). Parse the comma **explicitly** (e.g. replace `,` by `.` and parse with `CultureInfo.InvariantCulture`), not via the `de-DE` culture and not via the machine culture: on macOS .NET may run in invariant-globalization mode, where `de-DE` isn't available or silently behaves like invariant. The original's locale dependence (quirk 9a) is a Part 4 step 2 problem, not something to port. Lines may end in `\r\n` or `\n`; handle both. Lines that don't parse are skipped silently, a missing file means all allowances 0 (quirks 8, 9a). Point the port at the repository's `personal.dat`; don't copy the data into code.
 
 ## Contract layer: rules to mirror (`uLohnrechnerVertrag.pas`)
 
@@ -85,16 +87,22 @@ Allowances (`personal.dat`): lines `employeeNumber;amount`, amount with a **Germ
 - **`0.09` is not one number.** In `KiSt := Steuer * 0.09` and `Rate * 0.09` the literal is an 80-bit Extended in Delphi; a C# `0.09` is a double, and `0.09m` is exact decimal. All three differ.
 - **Currency rounding vs. truncation.** Storing a product into `Currency` **rounds** to 4 decimals; `Trunc(...)` **truncates**. Don't use one for the other.
 - **`decimal` hides the binary step.** `Math.Truncate((brutto - steuer - kist) * 100m)` is exact; Delphi does `× 100` and `Trunc` on the FPU. For values with 3–4 decimals this could land just below an integer in binary. If gross-to-net cases fail, look here.
-- **Culture.** Use `CultureInfo.InvariantCulture` for the contract's amounts and German format only for `personal.dat`. Nothing may depend on the machine's culture.
+- **Culture.** Use `CultureInfo.InvariantCulture` everywhere, with the comma in `personal.dat` handled explicitly. Nothing may depend on the machine's culture or on `de-DE` being available (macOS invariant-globalization mode).
+- **macOS specifics.**
+  - Build paths with `Path.Combine`; the repository docs show Windows paths with backslashes.
+  - Match the exact case of folder and file names (`golden/contract/cases.json`), in case the file system is case-sensitive.
+  - Bind the test server to `127.0.0.1` with port `0`, so no firewall prompt and no fixed port.
+  - Apple Silicon (arm64) and Intel both calculate `double` in IEEE 64-bit, so the results are the same on both, and both differ from Delphi's 80-bit x87 in the same way.
 - **Model binding.** See above: it would silently accept invalid requests.
 - **Paths.** Find `cases.json` and `personal.dat` relative to the repository (walk up from the executable until the folder `zvoove_Software_Engineer_AI_Case_study_candidate` exists, or accept a path argument), not by an absolute path.
-- **Long paths, line endings.** The repo path is deep, and git converts line endings on Windows; `cases.json` content isn't affected (it's read as JSON).
+- **Line endings.** Files checked out on the Mac have `\n`, on Windows `\r\n`. `cases.json` isn't affected, since it's read as JSON; `personal.dat` must accept both.
 
 ## Deliver
 
 - The three projects under `port/`, building without errors. `.gitignore` on this branch already ignores their `bin/` and `obj/` folders.
 - `QUIRK (deliberately not fixed)` comments in the C# core at the same places as in `uLohnrechnerCore.pas`, citing the same rows of `docs/uMain-behavior.md`.
-- **`run-tests.ps1`:** add the port check as an optional step. If `dotnet` is on the PATH, run the contract tests and require `RESULT: OK`; if not, print `SKIPPED port tests (no .NET SDK)` and don't fail. The Delphi part must keep working unchanged on a machine without .NET, and the port step must not need Delphi.
+- **One cross-platform command** to run the port tests, documented in the README, e.g. `dotnet run --project port/Lohnrechner.ContractTests`. Optionally a small `port/run-port-tests.sh` for macOS/Linux that runs it and exits with its exit code.
+- **Don't change `run-tests.ps1` / `run-tests.bat`.** They're Windows-only and can't be tested on the Mac. After the merge, the Windows session adds the port as an optional step: run it if `dotnet` is installed, otherwise print `SKIPPED`. So the exact command and the exact last lines of the output must be in the PR description.
 - **Docs:**
   - `README.md`: a short "Bonus: C# port" section (how to run, what it proves, results incl. any differing cases).
   - Update the "What was cut" section, where the port is currently listed as not done.
