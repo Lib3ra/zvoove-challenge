@@ -83,3 +83,5 @@ __recovery/
 **/tests/bin/
 **/tests/Win32/
 **/tests/Win64/
+**/tests/personal.dat
+**/tests/GoldenTests.res

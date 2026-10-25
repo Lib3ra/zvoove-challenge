@@ -3,7 +3,7 @@ rem Runs the golden-file tests of MiniLohnrechner (Win32).
 rem  1. Builds tests\GoldenTests.dpr with dcc32 into tests\bin, if this Delphi allows
 rem     command-line builds. Community Edition does not: it prints an error and still
 rem     exits 0, so success is judged by the exe existing, not by the exit code.
-rem  2. Otherwise uses a GoldenTests.exe built in the IDE (Win32 Debug or Release).
+rem  2. Otherwise uses a GoldenTests.exe built in the IDE (tests\, or tests\Win32\Debug|Release).
 rem  3. Passes only if the runner prints "RESULT: OK".
 setlocal
 set "APP=%~dp0zvoove_Software_Engineer_AI_Case_study_candidate\MiniLohnrechner_Case_Study\MiniLohnrechner_Bewerberaufgabe"
@@ -23,6 +23,7 @@ if defined RSVARS (
 
 if not defined EXE (
   echo Command-line build not available. Looking for a GoldenTests.exe built in the IDE.
+  if exist "%TESTS%\GoldenTests.exe" set "EXE=%TESTS%\GoldenTests.exe"
   for %%C in (Release Debug) do if exist "%TESTS%\Win32\%%C\GoldenTests.exe" set "EXE=%TESTS%\Win32\%%C\GoldenTests.exe"
 )
 if not defined EXE (
