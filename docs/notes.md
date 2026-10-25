@@ -19,6 +19,8 @@ Starter code: `.../MiniLohnrechner_Case_Study/MiniLohnrechner_Bewerberaufgabe/`
 3. Build and run the untouched starter app. Click through the quirks list below and confirm or refute each one. Note exact outputs (these become test expectations).
 4. Write the skill draft, then start Part 1.
 
+**Order changed:** the skill was written before the click-through, so step 3 is done by following it. Skill: `.claude/skills/delphi-form-extraction/SKILL.md`. Step 1 output: `docs/uMain-behavior.md`.
+
 ## Requirements
 
 M = mandatory, O = optional, as labeled in the spec.
@@ -70,3 +72,11 @@ Each confirmed quirk needs a preserving source comment and a test.
 10. Possibly intended: classes II and IV share rate 0.18; `CurrToStr` shows `1234,5` rather than `1234,50`; division by zero is unreachable (max rate 0.30 * 1.09).
 
 Data: `personal.dat` = `1001;250,00`, `1002;0,00`, `1003;1000,00` (CRLF).
+
+## Verified on Windows (Delphi 13 CE, Studio 37.0)
+
+- **CE refuses command-line compiling**: `dcc32` prints "This version of the product does not support command line compiling." and still exits with 0. Scripts must check that the output exists, not the exit code.
+- **Quirk 9 confirmed, en-US regional format** (decimal `.`): 1001, class III, no church tax, typing `12344` into empty Brutto gives Netto `11109.6` (= allowance 0; with 250 it would be 11134.6). `personal.dat` sat next to the exe, so all three allowances failed to parse and were silently dropped.
+- **Quirk 1 confirmed** in the same run: running total `12342.60` = 0.9 + 10.8 + 110.7 + 1110.6 + 11109.6, one addition per keystroke.
+- **German regional format, same input**: Netto `11134,6`, running total `12406,20 EUR` (1 + 12 + 123 + 1135,6 + 11134,6). Allowance applied; code reading of `BerechneNetto` confirmed. All further expectations are recorded under de-DE.
+- **Click-through done** (`docs/uMain-behavior.md`): all rows confirmed except 8 (missing `personal.dat`) and 9b (reset caption), which were skipped and rest on code reading only. Quirk 4 is real but input-dependent: Netto -> Brutto loses a cent for class II (`82` -> `99,99`) and VI (`70` -> `99,99`), not for I, III, V. Win32 x87 floating point is involved, so **the test project must target Win32** like the app.
