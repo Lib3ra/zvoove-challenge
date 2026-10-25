@@ -4,6 +4,7 @@ Part 4, step 1. The language- and UI-independent contract for the calculation th
 
 - **Reference implementation:** `MiniLohnrechner_Bewerberaufgabe/uLohnrechnerVertrag.pas`, a thin wrapper around `uLohnrechnerCore.pas`. No business logic of its own, no UI, only `System` units.
 - **Test data:** `MiniLohnrechner_Bewerberaufgabe/tests/golden/contract/cases.json`, 1680 request/response pairs, generated from the recorded golden grid.
+- **Second implementation:** the C# port in `port/` (bonus), `POST /calculate` as an ASP.NET Core minimal API. It passes the same `cases.json`, in-process and over HTTP: `dotnet run --project port/Lohnrechner.ContractTests`. Port choices: [`decisions.md`](decisions.md) D22.
 - **Why it looks like this:** [`decisions.md`](decisions.md) D19–D21.
 
 ## Request

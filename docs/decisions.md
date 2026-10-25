@@ -143,6 +143,18 @@ The target architecture is not decided, so these decisions are built on stated a
 - **Left out:** a small command-line program for live demos (JSON in, JSON out, without any window code). Useful for showing and as an extra separation proof, but not needed by the next steps; left out to keep the slice smallest.
 - **Stopgap until step 2:** like the tests, the reference implementation still relies on `personal.dat` being loaded with German number format.
 
+## D22 Bonus: C# port as a minimal API, with Delphi's 80-bit arithmetic emulated
+**Decided.** `port/`: `Lohnrechner.Core` (core + contract layer, no ASP.NET), `Lohnrechner.Api` (`POST /calculate`), `Lohnrechner.ContractTests` (console runner). .NET 10, no NuGet packages. Built and tested on macOS.
+- **Same test data as Delphi:** the runner reads the unchanged `cases.json` and checks all 1680 cases twice, in-process and over HTTP (API started on `127.0.0.1`, free port), plus the 8 malformed requests of `uContractCases.pas`.
+- **Numbers: `decimal` for `Currency`, an `Extended` type for floating point.** The first, straightforward port (`double` for rates and the net → gross formula) failed **9 of 1680** cases by one cent, all net → gross: `g0115 g0160 g0211 g0640 g0782 g0878 g0980 g1312 g1648`. Delphi Win32 computes on the x87 FPU with 80-bit intermediates; .NET uses 64-bit `double` on every platform, also in 32-bit processes, and has no 80-bit type. `g0640` is behavior-record row 4e, so the double port would have lost an observed quirk. `Extended.cs` computes each operation exactly with `BigInteger` and rounds to a 64-bit mantissa (round half to even), like the FPU. Result: 1680/1680. A Python model of the same arithmetic matched all 720 successful net → gross cases before the C# code was written.
+- **The model is judged by `cases.json`, not proven against the compiler.** How Delphi compiles `Currency * Double` (scaled integer times the double, stored rounded) is assumed. The gross → net cases pass with `double` too, so they don't distinguish the models there; the port uses `Extended` everywhere for consistency with the Delphi source (e.g. the literal `0.09` is an Extended constant).
+- **Proof the tests catch a change:** truncation replaced by rounding in net → gross gives 314 failures in each run, the same count the Delphi suite lost to the same change. Reverted, green again.
+- **HTTP status:** `200` success, `422` business error (the request was understood: `NO_TAX_CLASS`, `NEGATIVE_GROSS`, `NEGATIVE_NET`), `400` `INVALID_REQUEST`, always with the contract body. The contract defines the body only; the runner also checks the status.
+- **No model binding:** the raw body is parsed with `JsonDocument` and every field's JSON kind is checked, like the Delphi wrapper. Binding would accept `"1001"` for a number. Duplicate fields: the first one counts, like Delphi's `TJSONObject.Values`.
+- **Not ported:** the annual total (D19, not part of the contract); the machine-culture parsing of `personal.dat` (quirk 9a): the port reads the comma explicitly, because that dependence is step 2's problem, not behavior to copy.
+- **Known differences, not covered by `cases.json`:** `personal.dat` lines with forms only Delphi's `TryStrToInt` accepts (leading spaces, hex `$10`) are skipped by the port; an `amount` with a trailing newline (`"5\n"`) is rejected by the port, while Delphi's regex `$` would let it reach `TryStrToCurr`. Neither occurs in the data or in normal requests.
+- **Side finding, not verified:** Delphi Win64 also calculates in 64-bit `double`, so a Win64 build of the Delphi app would probably lose the same 9 cases. One more reason for D9 (stay on Win32).
+
 ## Open questions for the team (Part 4)
 
 ## O2 Where employee data comes from in a service
