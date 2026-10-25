@@ -105,6 +105,7 @@ The Delphi app has one window (`uMain.pas` + `uMain.dfm`, like a WinForms view w
 2. A second test mode replays the 1680 calculation cases **directly against the core**, without the window.
 3. Unit tests for what the window tests can't reach: missing data file, unknown employee.
 4. Deliberately break one rule in the core, confirm the tests go red, revert.
+- **Result:** 1 and 2 green (1717 window cases; 1680 core cases + 10 core unit tests). Breaking the core by "fixing" the lost cent (`Round` instead of `Trunc`) failed 320 window cases, 314 core cases and 1 unit test; reverted. The watchdog was proven with a self-test mode. A check in `run-tests` fails if the core ever uses window or dialog units.
 
 ## D18 No extra golden files for edge inputs and environment variants
 **Decided.** Considered right before the extraction (the last clean moment to record from the original), and skipped.
