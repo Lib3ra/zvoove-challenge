@@ -71,40 +71,46 @@ The Delphi app has one window (`uMain.pas` + `uMain.dfm`, like a WinForms view w
 ## Part 1: extraction design
 
 ## D12 New unit for the core; German names; code moved, not rewritten
-**Proposed.** A new unit `uLohnrechnerCore.pas` without any `Vcl` (window) or dialog units.
+**Decided.** A new unit `uLohnrechnerCore.pas` without any `Vcl` (window) or dialog units.
 - **Why German names:** every moved line can be matched to the original by a reviewer. Comments in English.
 - **Moved verbatim:** tax-rate table, both formulas, `Trunc` rounding, the `Currency`/`Double` mix, the check order (class before sign). Every preserved quirk gets a `// QUIRK (deliberately not fixed)` comment pointing to its behavior-record row.
 
 ## D13 Calculations take all inputs as parameters (stateless)
-**Proposed.** `BerechneNetto(Brutto, Personalnummer, Steuerklasse, Kirchensteuer)` instead of a core object that remembers the last employee number, class and church tax.
+**Decided.** `BerechneNetto(Brutto, Personalnummer, Steuerklasse, Kirchensteuer)` instead of a core object that remembers the last employee number, class and church tax.
 - **Why:** a future web API is stateless: every request carries all inputs. A core that remembers UI selections fits one window, not a service. The form already holds those values; it passes them on.
 - **Rejected:** core object with properties mirroring the form fields (first proposal, revised after thinking through the service case).
 - **Keystroke quirks still work:** they come from *when* the window calls the calculation (its `OnChange` handlers fire on every key and on every class / church / employee change), not from the core remembering inputs. The window keeps that wiring unchanged and passes its current values on each call; the core keeps adding every net result to the total. Pinned by curated cases 1, 5a, 6, 7c and the sequence file.
 - **Trap found while checking this:** today the total label is only rewritten after a *successful* net calculation (`BerechneNetto` exits before the label update on errors). The window must keep that: update the label only on success. Updating it always would look identical under German format, but on an English Windows would turn the hard-coded reset text `0,00` into `0.00` after an error. The golden tests pin German format and would **not** catch this, so it gets a source comment.
 
 ## D14 Errors are returned, not shown
-**Proposed.** The calculation returns the amount plus an error kind (none / no tax class / negative gross / negative net). The error texts live in the core so every caller shows the same message.
+**Decided.** The calculation returns the amount plus an error kind (none / no tax class / negative gross / negative net). The error texts live in the core so every caller shows the same message.
 - **Why:** a service has no screen. The window decides how to show it (info box vs. warning, as today); a web API would return an error response.
 - **Stays exactly as today:** error result = amount 0, nothing added to the total, same texts, same order of checks.
 
 ## D15 Allowance lookup passed in as a function
-**Proposed.** The core receives "give me the allowance for employee N" as a function parameter, not the global `Personalstamm` object.
+**Decided.** The core receives "give me the allowance for employee N" as a function parameter, not the global `Personalstamm` object.
 - **Why:** tests can pass a fake (e.g. "file missing" = always 0); a service can later read from a database. A function rather than a Delphi interface, because a reference-counted interface would free the global object.
 - **Not changed:** `uPersonalstamm` itself (global object, loads at start, locale-dependent). It is data access, already UI-free; changing it is outside "separate logic from UI" and would risk behavior changes.
 
 ## D16 What stays in the window
-**Proposed.** These lines stay in the window **unchanged**: reading and parsing the input fields, formatting results (`CurrToStr`, the total label, the hard-coded reset text), showing dialogs, the re-entrancy guard, and "recalculate from Brutto whenever a field changes".
+**Decided.** These lines stay in the window **unchanged**: reading and parsing the input fields, formatting results (`CurrToStr`, the total label, the hard-coded reset text), showing dialogs, the re-entrancy guard, and "recalculate from Brutto whenever a field changes".
 - **Nothing new is introduced here.** Example: the original already turns a non-numeric employee number into 0 (`uMain.pas:136-137`, quirk 7, observed in row 7a). That code stays where it is; the core receives a number.
 - **Why in the window, not the core:** these are presentation choices tied to text fields. A web API receives numbers from JSON, where "abc" can't occur, and decides itself how to reject bad input. Moving the parsing into the core would force that UI quirk on every future caller.
 - **Test used to draw the line:** "Would a web API caller need the same rule?" Yes → business logic → core (e.g. "gross must not be negative"). No, it only exists because the input is a text field → window (is `abc` a number, German comma, label decimals).
 - **Likely objection:** "invalid input silently means no allowance" sounds like a business policy. The policy ("no known employee → allowance 0") stays in the allowance lookup and applies to every caller; only the text-to-number conversion stays in the window. Together they give exactly today's result.
 
 ## D17 Proof for Part 1
-**Proposed.**
+**Decided.**
 1. All golden files pass **unchanged** against the refactored window.
 2. A second test mode replays the 1680 calculation cases **directly against the core**, without the window.
 3. Unit tests for what the window tests can't reach: missing data file, unknown employee.
 4. Deliberately break one rule in the core, confirm the tests go red, revert.
+
+## D18 No extra golden files for edge inputs and environment variants
+**Decided.** Considered right before the extraction (the last clean moment to record from the original), and skipped.
+- **Considered:** an edge-input file (`1.000`, `,5`, `1E3`, more than 4 decimals, amounts large enough to overflow) and golden runs under English format and without `personal.dat`.
+- **Why skipped:** not required by the spec: success, error and discovered edge cases are already covered or planned (missing data file and unknown employee via core unit tests, D17). The extraction moves code verbatim with the same types, so behavior on unusual input should not change.
+- **Residual risk, accepted and stated:** unusual inputs and overflow behavior are not pinned by a recording; the label-update trap (D13) and English-format behavior are protected by source comments and code review, not by a test.
 
 ---
 

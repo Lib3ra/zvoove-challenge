@@ -12,6 +12,7 @@ program GoldenTests;
 uses
   uTestSetup in 'uTestSetup.pas',  // first: pins locale and places personal.dat before uPersonalstamm loads it
   uPersonalstamm in '..\uPersonalstamm.pas',
+  uLohnrechnerCore in '..\uLohnrechnerCore.pas',
   uMain in '..\uMain.pas' {Form1},
   uGoldenRunner in 'uGoldenRunner.pas';
 

@@ -143,6 +143,7 @@
         </DelphiCompile>
         <DCCReference Include="uTestSetup.pas"/>
         <DCCReference Include="..\uPersonalstamm.pas"/>
+        <DCCReference Include="..\uLohnrechnerCore.pas"/>
         <DCCReference Include="..\uMain.pas">
             <Form>Form1</Form>
         </DCCReference>
