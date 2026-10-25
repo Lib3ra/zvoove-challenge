@@ -1,5 +1,6 @@
 ﻿# Recorded from the ORIGINAL uMain.pas with "GoldenTests record".
 # Never re-record after the refactoring: a change here means behavior changed.
+# cases: 1680
 
 [case g0001]
 set pers 1001
