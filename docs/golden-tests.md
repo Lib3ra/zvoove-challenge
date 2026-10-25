@@ -54,7 +54,7 @@ Any mismatch prints `FAIL curated.txt:<line> [<case>] netto: expected "900", got
 
 **3. Modal dialogs.** `ShowMessage` and `MessageDlg` open a modal window and wait for OK, which would block the test forever. A `TTimer` solves it: timers only fire while messages are being processed, and during a calculation that only happens inside the dialog's own wait loop. The timer finds the open message form, logs its kind and text (e.g. `warning Brutto darf nicht negativ sein.`), and closes it. The kind is read from the caption: `Warning` means a warning, the application title means `ShowMessage`. `UseLatestCommonDialogs := False` makes Delphi use its own message form instead of a Windows task dialog, which the timer could not see.
 
-**4. Hangs.** If code ever showed a dialog the timer doesn't recognize, the test would wait forever. A watchdog thread checks every half second; if one step runs longer than 10 seconds, it prints the file and line, `RESULT: FAILED`, and ends the process.
+**4. Hangs.** If code ever showed a dialog the timer doesn't recognize, the test would wait forever. A watchdog thread checks every half second; if one step runs longer than 10 seconds, it prints the file and line, `RESULT: FAILED`, and ends the process. Side effect: pausing at a breakpoint for more than 10 seconds while debugging the tests ends the process too.
 
 ## Where the expected values come from
 
@@ -89,16 +89,31 @@ A test suite that passes for the wrong reason is worse than none. Guards:
 
 ## Limits (say these out loud)
 
-- **Not tested:** a missing `personal.dat` and a non-German regional format. The data is loaded once per process with the pinned format. Both are documented in the behavior record and will be covered by unit tests of the extracted core.
+- **Not tested:** a missing `personal.dat` and a non-German regional format. The data is loaded once per process with the pinned format. Both are documented in the behavior record. The core's side of "no data" (allowance 0) is covered by a core unit test; the file loading itself and the English-format display are not.
 - Typing only appends or removes at the end of a field. Editing in the middle, selection and focus are not simulated.
 - Nothing visual: layout, icons, button captions.
 - Win32 only, like the app. Whether Win64 gives different cents was not checked.
 
-## After the extraction, and towards a service
+## Two drivers: with and without the window
 
-- **Extraction:** the form keeps its controls and handlers, which now call the core. The same exe, rebuilt, runs the same golden files unchanged. Green before and after is the proof.
-- **Core unit tests:** the runner gets a second "driver" that calls the core directly instead of the form. The calculation cases (`grid`) can run against both.
-- **Standalone service:** the same calculation cases can drive a service API through a third driver, with dialogs mapped to error codes and formatted text to numbers. The wiring cases (keystrokes, field changes) are UI-specific and stay with the form. The same data files also fit the optional port bonus.
+After the extraction the runner has two "drivers" behind the same file reader:
+
+- **`TFormDriver`** (default mode): the real window, as described above. Runs all three golden files.
+- **`TCoreDriver`** (`GoldenTests core`): no window at all. It holds the field texts as plain strings and calls `TLohnrechner` directly through a small adapter: parse the text, call the core with all inputs, format the result, turn an error kind into `message`/`warning`. That is exactly what any other caller would do. It runs only `grid.golden.txt` (the calculation cases, entered with `set`); typing and field-change wiring only exist in the window.
+
+Both must reproduce the original results. Core mode also runs 11 unit tests (`uCoreTests.pas`) for what the window can't reach, such as a missing data file (lookup returns 0) and the annual total as a number.
+
+A future web API would get a third driver of the same shape: map `set brutto 1000` to a request, map error kinds to HTTP errors, compare numbers instead of German text.
+
+## Proven after the extraction
+
+- Same golden files, unchanged: 1717 window cases green; 1680 core cases + 11 unit tests green.
+- Deliberate break: `Round` instead of `Trunc` in the core's net → gross ("fixing" the lost cent). 320 window cases, 314 core cases and 1 unit test failed. Reverted.
+- Watchdog: `GoldenTests selftest-watchdog` opens a Windows message box the runner can't close; the watchdog ended the process after 10.2 s with exit code 1.
+
+## Where to see the output
+
+`run-tests.bat` prints everything to the console it runs in: open PowerShell in the repository folder and run `.\run-tests.bat`. Starting `GoldenTests` from the IDE opens a console window that closes as soon as the run ends.
 
 ## Likely questions
 

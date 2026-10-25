@@ -1,6 +1,8 @@
 unit uGoldenRunner;
 
-{ Replays golden files against TForm1 and compares what the form shows.
+{ Replays golden files and compares what a user would see. Two drivers:
+  TFormDriver runs the real TForm1; TCoreDriver runs uLohnrechnerCore without any
+  window, through a minimal adapter like any other caller would use.
 
   File format (one statement per line, '#' starts a comment):
     [case <id> <title>]        starts a case with a fresh form (= restarting the app)
@@ -26,10 +28,10 @@ function RunGolden: Integer;  // process exit code: 0 ok, 1 failures, 2 setup er
 implementation
 
 uses
-  Winapi.Windows, System.SysUtils, System.Classes, System.IOUtils, System.UITypes,
+  Winapi.Windows, System.SysUtils, System.StrUtils, System.Classes, System.IOUtils, System.UITypes,
   System.SyncObjs, System.Generics.Collections,
   Vcl.Forms, Vcl.StdCtrls, Vcl.ExtCtrls, Vcl.Dialogs, Vcl.Consts,
-  uTestSetup, uPersonalstamm, uMain;
+  uTestSetup, uPersonalstamm, uMain, uLohnrechnerCore, uCoreTests;
 
 const
   RequiredFiles: array[0..2] of string = ('curated.txt', 'grid.golden.txt', 'sequence.golden.txt');
@@ -52,27 +54,67 @@ type
   TDialogCatcher = class
   private
     FTimer: TTimer;
+    FLog: TStringList;
     procedure Tick(Sender: TObject);
   public
-    Log: TStringList;
-    constructor Create;
+    constructor Create(Log: TStringList);
     destructor Destroy; override;
   end;
 
-  TCaseRunner = class
-  private
-    FForm: TForm1;
-    FDialogs: TDialogCatcher;
-    function Field(const Name: string): TEdit;
-    procedure DoAct(const Line: string);
+  // What the cases run against. Subclasses perform the actions and report what a
+  // user would see; checking and observing is shared.
+  TDriver = class
+  protected
+    FDialogs: TStringList;  // '<kind> <text>' of every message shown, in order
+    procedure DoAct(const Line: string); virtual; abstract;
+    function FieldText(const Name: string): string; virtual; abstract;
+    function TotalCaption: string; virtual; abstract;
   public
     constructor Create;
     destructor Destroy; override;
-    procedure Restart;
+    procedure Restart; virtual; abstract;
     procedure Act(const Line: string);
     function Check(const Line: string; out Msg: string): Boolean;
     function Observe: TArray<string>;
     function PendingDialogs: string;
+  end;
+
+  // The real TForm1, driven through its controls like a user
+  TFormDriver = class(TDriver)
+  private
+    FForm: TForm1;
+    FCatcher: TDialogCatcher;
+    function Field(const Name: string): TEdit;
+  protected
+    procedure DoAct(const Line: string); override;
+    function FieldText(const Name: string): string; override;
+    function TotalCaption: string; override;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure Restart; override;
+  end;
+
+  // The core TLohnrechner without any window. A minimal adapter mirrors what TForm1's
+  // event handlers do (parse text, call the core, format the result, report the message
+  // kind), the way any other caller such as a web API would. Only for cases that enter
+  // values with 'set', 'class' and 'church' (the calculation grid).
+  TCoreDriver = class(TDriver)
+  private
+    FRechner: TLohnrechner;
+    FPers, FBrutto, FNetto, FTotal: string;
+    FPersonalnummer, FSteuerklasse: Integer;
+    FKirchensteuer: Boolean;
+    procedure ZeigeFehler(Fehler: TLohnFehler);
+    procedure AusBrutto;
+    procedure AusNetto;
+  protected
+    procedure DoAct(const Line: string); override;
+    function FieldText(const Name: string): string; override;
+    function TotalCaption: string; override;
+  public
+    destructor Destroy; override;
+    procedure Restart; override;
   end;
 
   TStats = record
@@ -134,10 +176,10 @@ end;
 
 { TDialogCatcher }
 
-constructor TDialogCatcher.Create;
+constructor TDialogCatcher.Create(Log: TStringList);
 begin
   inherited Create;
-  Log := TStringList.Create;
+  FLog := Log;
   FTimer := TTimer.Create(nil);
   FTimer.Interval := 10;
   FTimer.OnTimer := Tick;
@@ -146,7 +188,6 @@ end;
 destructor TDialogCatcher.Destroy;
 begin
   FTimer.Free;
-  Log.Free;
   inherited;
 end;
 
@@ -166,35 +207,110 @@ begin
       for J := 0 to F.ComponentCount - 1 do
         if F.Components[J] is TLabel then
           Text := TLabel(F.Components[J]).Caption;
-      Log.Add(DialogKind(F.Caption) + ' ' + Text);
+      FLog.Add(DialogKind(F.Caption) + ' ' + Text);
       F.ModalResult := mrOk;
     end;
   end;
 end;
 
-{ TCaseRunner }
+{ TDriver }
 
-constructor TCaseRunner.Create;
+constructor TDriver.Create;
 begin
   inherited Create;
-  FDialogs := TDialogCatcher.Create;
+  FDialogs := TStringList.Create;
 end;
 
-destructor TCaseRunner.Destroy;
+destructor TDriver.Destroy;
 begin
-  FForm.Free;
   FDialogs.Free;
   inherited;
 end;
 
-procedure TCaseRunner.Restart;
+procedure TDriver.Act(const Line: string);
+begin
+  TInterlocked.Exchange(BusySince, Int64(GetTickCount64));
+  try
+    DoAct(Line);
+  finally
+    TInterlocked.Exchange(BusySince, 0);
+  end;
+end;
+
+function TDriver.PendingDialogs: string;
+begin
+  Result := String.Join(' | ', FDialogs.ToStringArray);
+end;
+
+function TDriver.Check(const Line: string; out Msg: string): Boolean;
+var
+  What, Expected, Actual: string;
+begin
+  SplitFirst(Line, What, Expected);
+  if What = 'dialog' then
+  begin
+    if FDialogs.Count = 0 then
+      Actual := '(no dialog)'
+    else
+    begin
+      Actual := FDialogs[0];
+      FDialogs.Delete(0);
+    end;
+  end
+  else if What = 'no-dialog' then
+  begin
+    Actual := PendingDialogs;
+    FDialogs.Clear;
+  end
+  else if What = 'total' then
+    Actual := TotalCaption
+  else
+    Actual := FieldText(What);
+  Result := Actual = Expected;
+  if not Result then
+    Msg := Format('%s: expected "%s", got "%s"', [What, Expected, Actual]);
+end;
+
+// Everything the user can see after the actions, as expect lines
+function TDriver.Observe: TArray<string>;
+var
+  D: string;
+begin
+  Result := [];
+  for D in FDialogs do
+    Result := Result + ['expect dialog ' + D];
+  if FDialogs.Count = 0 then
+    Result := Result + ['expect no-dialog'];
+  FDialogs.Clear;
+  Result := Result + [
+    TrimRight('expect brutto ' + FieldText('brutto')),
+    TrimRight('expect netto ' + FieldText('netto')),
+    'expect total ' + TotalCaption];
+end;
+
+{ TFormDriver }
+
+constructor TFormDriver.Create;
+begin
+  inherited Create;
+  FCatcher := TDialogCatcher.Create(FDialogs);
+end;
+
+destructor TFormDriver.Destroy;
+begin
+  FForm.Free;
+  FCatcher.Free;
+  inherited;
+end;
+
+procedure TFormDriver.Restart;
 begin
   FreeAndNil(FForm);
-  FDialogs.Log.Clear;
+  FDialogs.Clear;
   FForm := TForm1.Create(nil);
 end;
 
-function TCaseRunner.Field(const Name: string): TEdit;
+function TFormDriver.Field(const Name: string): TEdit;
 begin
   if Name = 'pers' then
     Result := FForm.editPersonalnummer
@@ -206,17 +322,17 @@ begin
     raise Exception.CreateFmt('unknown field "%s"', [Name]);
 end;
 
-procedure TCaseRunner.Act(const Line: string);
+function TFormDriver.FieldText(const Name: string): string;
 begin
-  TInterlocked.Exchange(BusySince, Int64(GetTickCount64));
-  try
-    DoAct(Line);
-  finally
-    TInterlocked.Exchange(BusySince, 0);
-  end;
+  Result := Field(Name).Text;
 end;
 
-procedure TCaseRunner.DoAct(const Line: string);
+function TFormDriver.TotalCaption: string;
+begin
+  Result := FForm.lblJahressumme.Caption;
+end;
+
+procedure TFormDriver.DoAct(const Line: string);
 var
   Verb, Rest, Name, Value: string;
   E: TEdit;
@@ -254,58 +370,138 @@ begin
     raise Exception.CreateFmt('unknown action "%s"', [Line]);
 end;
 
-function TCaseRunner.PendingDialogs: string;
+{ TCoreDriver }
+
+destructor TCoreDriver.Destroy;
 begin
-  Result := String.Join(' | ', FDialogs.Log.ToStringArray);
+  FRechner.Free;
+  inherited;
 end;
 
-function TCaseRunner.Check(const Line: string; out Msg: string): Boolean;
-var
-  What, Expected, Actual: string;
+// Same start state as the window: empty fields, no class, the label text from uMain.dfm
+procedure TCoreDriver.Restart;
 begin
-  SplitFirst(Line, What, Expected);
-  if What = 'dialog' then
-  begin
-    if FDialogs.Log.Count = 0 then
-      Actual := '(no dialog)'
-    else
+  FreeAndNil(FRechner);
+  FDialogs.Clear;
+  FRechner := TLohnrechner.Create(
+    function(Personalnummer: Integer): Currency
     begin
-      Actual := FDialogs.Log[0];
-      FDialogs.Log.Delete(0);
+      Result := Personalstamm.HoleFreibetrag(Personalnummer);
+    end);
+  FPers := '';
+  FBrutto := '';
+  FNetto := '';
+  FTotal := 'Jahressumme Netto: 0,00 EUR';
+  FPersonalnummer := 0;
+  FSteuerklasse := 0;
+  FKirchensteuer := False;
+end;
+
+procedure TCoreDriver.ZeigeFehler(Fehler: TLohnFehler);
+begin
+  case Fehler of
+    lfKeineSteuerklasse:
+      FDialogs.Add('message ' + FehlerText(Fehler));
+    lfBruttoNegativ, lfNettoNegativ:
+      FDialogs.Add('warning ' + FehlerText(Fehler));
+  end;
+end;
+
+procedure TCoreDriver.AusBrutto;
+var
+  Brutto: Currency;
+  Ergebnis: TLohnErgebnis;
+begin
+  if TryStrToCurr(FBrutto, Brutto) then
+  begin
+    Ergebnis := FRechner.BerechneNetto(Brutto, FPersonalnummer, FSteuerklasse, FKirchensteuer);
+    ZeigeFehler(Ergebnis.Fehler);
+    if Ergebnis.Fehler = lfKeiner then
+      FTotal := Format('Jahressumme Netto: %.2f EUR', [FRechner.GesamtsummeNetto]);
+    FNetto := CurrToStr(Ergebnis.Betrag);
+  end;
+end;
+
+procedure TCoreDriver.AusNetto;
+var
+  Netto: Currency;
+  Ergebnis: TLohnErgebnis;
+begin
+  if TryStrToCurr(FNetto, Netto) then
+  begin
+    Ergebnis := FRechner.BerechneBrutto(Netto, FPersonalnummer, FSteuerklasse, FKirchensteuer);
+    ZeigeFehler(Ergebnis.Fehler);
+    FBrutto := CurrToStr(Ergebnis.Betrag);
+  end;
+end;
+
+procedure TCoreDriver.DoAct(const Line: string);
+var
+  Verb, Rest, Name, Value: string;
+begin
+  SplitFirst(Line, Verb, Rest);
+  if Verb = 'set' then
+  begin
+    SplitFirst(Rest, Name, Value);
+    if Name = 'pers' then
+    begin
+      FPers := Value;
+      if not TryStrToInt(FPers, FPersonalnummer) then
+        FPersonalnummer := 0;
+      if FBrutto <> '' then
+        AusBrutto;
+    end
+    else if Name = 'brutto' then
+    begin
+      FBrutto := Value;
+      AusBrutto;
+    end
+    else if Name = 'netto' then
+    begin
+      FNetto := Value;
+      AusNetto;
+    end
+    else
+      raise Exception.CreateFmt('unknown field "%s"', [Name]);
+  end
+  else if Verb = 'class' then
+  begin
+    FSteuerklasse := StrToInt(Rest);
+    if FBrutto <> '' then
+      AusBrutto;
+  end
+  else if Verb = 'church' then
+  begin
+    // A check box only fires when its state changes
+    if FKirchensteuer <> (Rest = 'on') then
+    begin
+      FKirchensteuer := Rest = 'on';
+      if FBrutto <> '' then
+        AusBrutto;
     end;
   end
-  else if What = 'no-dialog' then
-  begin
-    Actual := PendingDialogs;
-    FDialogs.Log.Clear;
-  end
-  else if What = 'total' then
-    Actual := FForm.lblJahressumme.Caption
   else
-    Actual := Field(What).Text;
-  Result := Actual = Expected;
-  if not Result then
-    Msg := Format('%s: expected "%s", got "%s"', [What, Expected, Actual]);
+    raise Exception.CreateFmt('action not supported against the core: "%s"', [Line]);
 end;
 
-// Everything the user can see after the actions, as expect lines
-function TCaseRunner.Observe: TArray<string>;
-var
-  D: string;
+function TCoreDriver.FieldText(const Name: string): string;
 begin
-  Result := [];
-  for D in FDialogs.Log do
-    Result := Result + ['expect dialog ' + D];
-  if FDialogs.Log.Count = 0 then
-    Result := Result + ['expect no-dialog'];
-  FDialogs.Log.Clear;
-  Result := Result + [
-    TrimRight('expect brutto ' + FForm.editBrutto.Text),
-    TrimRight('expect netto ' + FForm.editNetto.Text),
-    'expect total ' + FForm.lblJahressumme.Caption];
+  if Name = 'pers' then
+    Result := FPers
+  else if Name = 'brutto' then
+    Result := FBrutto
+  else if Name = 'netto' then
+    Result := FNetto
+  else
+    raise Exception.CreateFmt('unknown field "%s"', [Name]);
 end;
 
-procedure RunFile(Runner: TCaseRunner; const FileName: string; var Stats: TStats);
+function TCoreDriver.TotalCaption: string;
+begin
+  Result := FTotal;
+end;
+
+procedure RunFile(Runner: TDriver; const FileName: string; var Stats: TStats);
 var
   Lines: TStringList;
   I, LineNo, FileCases, DeclaredCases: Integer;
@@ -390,7 +586,7 @@ end;
 
 { Recording. Steps are action lines; 'observe' writes what the form shows at that point. }
 
-procedure RecordCase(Runner: TCaseRunner; Lines: TStringList; const Id: string; const Steps: TArray<string>);
+procedure RecordCase(Runner: TDriver; Lines: TStringList; const Id: string; const Steps: TArray<string>);
 var
   S, O: string;
 begin
@@ -426,7 +622,7 @@ const
     '860', '1234,56', '99999,99');
 
 // Calculation grid: all combinations, class 0 = none picked, each value entered at once (set)
-function RecordGrid(Runner: TCaseRunner; const FileName: string): Integer;
+function RecordGrid(Runner: TDriver; const FileName: string): Integer;
 var
   Lines: TStringList;
   N: Integer;
@@ -471,7 +667,7 @@ end;
 // Event wiring: amount typed key by key, then every other control changes it, both directions,
 // with an observation after each step. Covers recalculation on church tax, class and employee
 // number changes, totals per keystroke, reset of the internal total, and the class picked late.
-function RecordSequence(Runner: TCaseRunner; const FileName: string): Integer;
+function RecordSequence(Runner: TDriver; const FileName: string): Integer;
 const
   Pers: array[0..1] of string = ('1001', '1003');
   Klassen: array[0..1] of Integer = (2, 3);
@@ -514,12 +710,26 @@ begin
   end;
 end;
 
+// Proves the watchdog: a plain Windows message box is invisible to the dialog catcher,
+// so this step hangs and the watchdog must end the process with exit code 1
+function SelfTestWatchdog: Integer;
+begin
+  Writeln('Watchdog self-test: a message box opens and must be closed by the watchdog within ',
+    StepTimeoutMs div 1000, ' s. Do not click it.');
+  CurrentWhere := 'selftest-watchdog';
+  TInterlocked.Exchange(BusySince, Int64(GetTickCount64));
+  MessageBox(0, 'GoldenTests watchdog self-test. Do not click.', 'GoldenTests', MB_OK);
+  Writeln('SELFTEST FAILED: the step returned, the watchdog did not end the process');
+  Result := 3;
+end;
+
 function RunAll: Integer;
 var
-  Runner: TCaseRunner;
-  GoldenDir, F: string;
+  Runner: TDriver;
+  GoldenDir, F, Mode: string;
   Files: TArray<string>;
   Stats: TStats;
+  UnitCases, UnitFailed: Integer;
 begin
   Result := 2;
   try
@@ -539,10 +749,18 @@ begin
       Exit;
     end;
     GoldenDir := TPath.Combine(AppDir, 'tests\golden');
+    Mode := LowerCase(ParamStr(1));
+    if Mode = 'selftest-watchdog' then
+      Exit(SelfTestWatchdog);
 
-    Runner := TCaseRunner.Create;
+    // 'core': the calculation grid against TLohnrechner without the window, plus unit tests.
+    // Default: every golden file against the real window.
+    if Mode = 'core' then
+      Runner := TCoreDriver.Create
+    else
+      Runner := TFormDriver.Create;
     try
-      if SameText(ParamStr(1), 'record') then
+      if Mode = 'record' then
       begin
         Writeln('Recorded ', RecordGrid(Runner, TPath.Combine(GoldenDir, 'grid.golden.txt')), ' grid cases');
         Writeln('Recorded ', RecordSequence(Runner, TPath.Combine(GoldenDir, 'sequence.golden.txt')), ' sequence cases');
@@ -550,18 +768,36 @@ begin
       end;
 
       Stats := Default(TStats);
-      for F in RequiredFiles do
-        if not FileExists(TPath.Combine(GoldenDir, F)) then
+      if Mode = 'core' then
+        Files := [TPath.Combine(GoldenDir, 'grid.golden.txt')]
+      else
+      begin
+        for F in RequiredFiles do
+          if not FileExists(TPath.Combine(GoldenDir, F)) then
+          begin
+            Writeln('FAIL missing golden file ', F);
+            Inc(Stats.FileErrors);
+          end;
+        Files := TDirectory.GetFiles(GoldenDir, '*.txt');
+        TArray.Sort<string>(Files);
+      end;
+      for F in Files do
+        if FileExists(F) then
+          RunFile(Runner, F, Stats)
+        else
         begin
-          Writeln('FAIL missing golden file ', F);
+          Writeln('FAIL missing golden file ', ExtractFileName(F));
           Inc(Stats.FileErrors);
         end;
-      Files := TDirectory.GetFiles(GoldenDir, '*.txt');
-      TArray.Sort<string>(Files);
-      for F in Files do
-        RunFile(Runner, F, Stats);
-      Writeln(Format('%d cases in %d files, %d failed, %d file errors',
-        [Stats.Cases, Length(Files), Stats.Failed, Stats.FileErrors]));
+      Writeln(Format('[%s] %d cases in %d files, %d failed, %d file errors',
+        [IfThen(Mode = 'core', 'core', 'form'), Stats.Cases, Length(Files), Stats.Failed, Stats.FileErrors]));
+      if Mode = 'core' then
+      begin
+        RunCoreUnitTests(UnitCases, UnitFailed);
+        Writeln(Format('[core] %d unit tests, %d failed', [UnitCases, UnitFailed]));
+        Inc(Stats.Cases, UnitCases);
+        Inc(Stats.Failed, UnitFailed);
+      end;
       if (Stats.Failed = 0) and (Stats.FileErrors = 0) and (Stats.Cases > 0) then
       begin
         Writeln('RESULT: OK');

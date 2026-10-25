@@ -99,6 +99,7 @@
             <Form>Form1</Form>
         </DCCReference>
         <DCCReference Include="uPersonalstamm.pas"/>
+        <DCCReference Include="uLohnrechnerCore.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

@@ -4,7 +4,9 @@
 #     exits 0, so success is judged by the exe existing, not by the exit code.
 #  2. On Community Edition, uses the newest GoldenTests.exe built in the IDE, and refuses
 #     it if it is older than any source file (it would test old code).
-#  3. Passes only if the runner exits with 0 AND prints "RESULT: OK".
+#  3. Checks that the extracted core unit only uses System units (no UI).
+#  4. Runs the exe twice (window mode and core mode); passes only if both exit with 0
+#     AND print "RESULT: OK".
 # Exit codes: 0 passed, 1 tests failed, 2 no usable test exe.
 
 $ErrorActionPreference = 'Stop'
@@ -48,13 +50,43 @@ if (-not $exe) {
   }
 }
 
-Write-Output "Running $($exe.FullName)"
-$output = & $exe.FullName
-$code = $LASTEXITCODE
-$output | Write-Output
-if ($code -eq 0 -and ($output -contains 'RESULT: OK')) {
+# The extracted core must not depend on the UI. Allow-list: its uses clauses may only name
+# System units (System, System.SysUtils, ...). Comments are removed first so they can't hide
+# or end a uses clause. Only direct dependencies are checked, not units used by those units.
+function Get-UsedUnits([string]$path) {
+  $src = Get-Content $path -Raw
+  $src = [regex]::Replace($src, '(?s)\{.*?\}|\(\*.*?\*\)|//[^\r\n]*', ' ')
+  foreach ($m in [regex]::Matches($src, '(?is)\buses\b(.*?);')) {
+    foreach ($part in $m.Groups[1].Value.Split(',')) {
+      ($part -replace "(?is)\bin\s+'[^']*'", '').Trim()
+    }
+  }
+}
+$failed = $false
+$notAllowed = @(Get-UsedUnits (Join-Path $app 'uLohnrechnerCore.pas') | Where-Object { $_ -notmatch '^System(\.|$)' })
+if ($notAllowed.Count -gt 0) {
+  Write-Output "FAIL uLohnrechnerCore.pas uses units outside System: $($notAllowed -join ', ')"
+  $failed = $true
+} else {
+  Write-Output 'uLohnrechnerCore.pas uses only System units (no UI)'
+}
+
+# Mode '' = every golden file against the real window; 'core' = the calculation grid
+# against the core without a window, plus the core unit tests
+foreach ($mode in @('', 'core')) {
+  Write-Output "Running $($exe.FullName) $mode"
+  $output = if ($mode) { & $exe.FullName $mode } else { & $exe.FullName }
+  $code = $LASTEXITCODE
+  $output | Write-Output
+  if ($code -ne 0 -or -not ($output -contains 'RESULT: OK')) {
+    Write-Output "FAILED: mode '$mode' (exit code $code)"
+    $failed = $true
+  }
+}
+
+if (-not $failed) {
   Write-Output 'TESTS PASSED'
   exit 0
 }
-Write-Output "TESTS FAILED (exit code $code)"
+Write-Output 'TESTS FAILED'
 exit 1

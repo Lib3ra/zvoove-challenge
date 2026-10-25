@@ -3,7 +3,8 @@ program MiniLohnrechner;
 uses
   Vcl.Forms,
   uMain in 'uMain.pas' {Form1},
-  uPersonalstamm in 'uPersonalstamm.pas';
+  uPersonalstamm in 'uPersonalstamm.pas',
+  uLohnrechnerCore in 'uLohnrechnerCore.pas';
 
 {$R *.res}
 

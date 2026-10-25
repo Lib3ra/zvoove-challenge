@@ -1,10 +1,12 @@
 program GoldenTests;
 
-{ Golden-file tests for MiniLohnrechner. Drives the real TForm1 through its
-  controls and compares against tests\golden\*.txt.
-    GoldenTests           verify all golden files (prints RESULT: OK / FAILED)
-    GoldenTests record    re-record golden\grid.golden.txt from the current code;
-                          only ever on the unmodified original
+{ Golden-file tests for MiniLohnrechner, compared against tests\golden\*.txt.
+    GoldenTests                     all golden files against the real TForm1 (prints RESULT: OK / FAILED)
+    GoldenTests core                the calculation grid against uLohnrechnerCore without
+                                    any window, plus the core unit tests (uCoreTests)
+    GoldenTests record              re-record the grid and sequence files from the current
+                                    code; only ever on the unmodified original
+    GoldenTests selftest-watchdog   proves the watchdog ends a hanging step (exit code 1)
   Build as Win32, like the app: floating point results differ on Win64. }
 
 {$APPTYPE CONSOLE}
@@ -12,7 +14,9 @@ program GoldenTests;
 uses
   uTestSetup in 'uTestSetup.pas',  // first: pins locale and places personal.dat before uPersonalstamm loads it
   uPersonalstamm in '..\uPersonalstamm.pas',
+  uLohnrechnerCore in '..\uLohnrechnerCore.pas',
   uMain in '..\uMain.pas' {Form1},
+  uCoreTests in 'uCoreTests.pas',
   uGoldenRunner in 'uGoldenRunner.pas';
 
 begin
