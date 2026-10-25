@@ -81,9 +81,40 @@ The recorded files are made with `GoldenTests record` on the unmodified original
 - Typing is simulated by appending or removing characters at the end. Editing in the middle of a field, selecting text, or focus changes are not simulated.
 - Visual details of the form (layout, dialog icons, buttons).
 
-## Part 3 artifact
+## Part 3 artifact: the extraction skill
 
-_To do: `.claude/skills/delphi-form-extraction/SKILL.md`, how it was used._
+**Where:** [`.claude/skills/delphi-form-extraction/SKILL.md`](.claude/skills/delphi-form-extraction/SKILL.md), one file.
+
+**What it is:** a Claude Code skill, i.e. a Markdown file with instructions that Claude Code loads when a task matches its description ("extract business logic from a Delphi VCL form without changing behavior"). It is plain text, so it works just as well as a checklist for a colleague without AI. It has four steps and a list of things never to accept from AI unchecked:
+
+1. Record the original's behavior in the running app, before touching code
+2. Map the logic in the form (UI vs. logic vs. state, and the typical traps)
+3. Pin the behavior with golden-file tests against the original, before any extraction
+4. Extract without changing behavior, run the same tests unchanged
+
+### How it was used here
+
+It was written **before Part 1** and then followed step by step. Each step produced something in this repository:
+
+| Skill step | What it produced | Where / commits |
+|---|---|---|
+| 1. Record behavior | Behavior record: 23 hypotheses, clicked through by hand in the running original | [`docs/uMain-behavior.md`](docs/uMain-behavior.md), 67cbfd2, 8804211 (PR #1) |
+| 2. Map the logic | What moves to the core, what stays in the window, and why | [`docs/decisions.md`](docs/decisions.md) D11–D16, 5661c9c |
+| 3. Golden-file tests | Runner, 21 curated + 1680 + 16 recorded cases, green on the original | `tests/`, ac2a586, 27598bc, 6d1bd87 (PR #2) |
+| 3. Independent review | A second AI session hunted for false greens; gaps fixed | 73cbd29 |
+| 4. Extract | `uLohnrechnerCore.pas`, `QUIRK (deliberately not fixed)` comments in the format the skill prescribes, same tests green | c196340, 9dfb9fe (PR #3) |
+| 4. Break on purpose | "Fixed" the lost cent; 634 golden cases failed; reverted | PR #3 description |
+| Never accept unchecked | Expected values only from the running app or recorded from the original; golden files never re-recorded after the extraction; AI-written quirk references checked against the record (three were wrong) | PR #3, 6813a72 |
+
+**It changed while being used**, which is the strongest sign that it was used and not written afterwards:
+- **7f57964:** the first draft had tests *after* the extraction, where they can only describe the new code. I caught it before Part 1; tests moved before the extraction, golden-file rules added.
+- **73cbd29:** lessons from the independent review added: trigger every event handler after input in both directions, refuse a stale test exe, guard golden files against truncation, let an independent reviewer look for false greens.
+
+### How a colleague uses it on the next form
+
+- **With Claude Code:** open the repository and ask, e.g., "extract the business logic from `uKunde.pas` following the delphi-form-extraction skill", or call it by name with `/delphi-form-extraction`. The skill tells Claude the order of work, what to verify, and what to leave to the human (expected values, approving golden recordings).
+- **Without AI:** read it top to bottom as a checklist. Step 1 and the "never accept" list matter most.
+- **Test template:** `tests/uGoldenRunner.pas` is reusable for another form. Only the control names in `Field` and the recorded input values are form-specific; the file format, dialog catcher, watchdog and record/verify modes stay the same. How it works: [`docs/golden-tests.md`](docs/golden-tests.md).
 
 ## Next steps (Part 4)
 
