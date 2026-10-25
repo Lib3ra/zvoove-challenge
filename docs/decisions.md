@@ -79,6 +79,8 @@ The Delphi app has one window (`uMain.pas` + `uMain.dfm`, like a WinForms view w
 **Proposed.** `BerechneNetto(Brutto, Personalnummer, Steuerklasse, Kirchensteuer)` instead of a core object that remembers the last employee number, class and church tax.
 - **Why:** a future web API is stateless: every request carries all inputs. A core that remembers UI selections fits one window, not a service. The form already holds those values; it passes them on.
 - **Rejected:** core object with properties mirroring the form fields (first proposal, revised after thinking through the service case).
+- **Keystroke quirks still work:** they come from *when* the window calls the calculation (its `OnChange` handlers fire on every key and on every class / church / employee change), not from the core remembering inputs. The window keeps that wiring unchanged and passes its current values on each call; the core keeps adding every net result to the total. Pinned by curated cases 1, 5a, 6, 7c and the sequence file.
+- **Trap found while checking this:** today the total label is only rewritten after a *successful* net calculation (`BerechneNetto` exits before the label update on errors). The window must keep that: update the label only on success. Updating it always would look identical under German format, but on an English Windows would turn the hard-coded reset text `0,00` into `0.00` after an error. The golden tests pin German format and would **not** catch this, so it gets a source comment.
 
 ## D14 Errors are returned, not shown
 **Proposed.** The calculation returns the amount plus an error kind (none / no tax class / negative gross / negative net). The error texts live in the core so every caller shows the same message.
